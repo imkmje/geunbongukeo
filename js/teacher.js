@@ -562,10 +562,12 @@ function makeDemo(){
 /* ---------- 시작 ---------- */
 document.addEventListener('submit',async e=>{
   if(e.target.id!=='loginForm')return;e.preventDefault();
-  const msg=$('#lgMsg');msg.textContent='로그인하는 중…';
+  const msg=$('#lgMsg');const btn=e.target.querySelector('button[type="submit"]');
+  if(btn?.disabled)return;// 답이 올 때까지 다시 보내지 않는다(학생 로그인과 같게)
+  msg.textContent='로그인하는 중…';if(btn){btn.disabled=true;btn.textContent='확인하는 중…'}
   let em=$('#lgEmail').value.trim();if(!em.includes('@'))em=em.toLowerCase()+'@'+(window.GB_CONFIG.loginDomain||'geunbongukeo.local');
-  const r=await sb.auth.signInWithPassword({email:em,password:$('#lgPw').value});
-  if(r.error){msg.textContent='로그인하지 못했습니다. 아이디(또는 이메일)와 비밀번호를 확인해 주세요.';return}
+  let r;try{r=await sb.auth.signInWithPassword({email:em,password:$('#lgPw').value})}catch(err){r={error:err}}
+  if(r.error){if(btn){btn.disabled=false;btn.textContent='로그인'}msg.textContent='로그인하지 못했습니다. 아이디(또는 이메일)와 비밀번호를 확인해 주세요.';return}
   await afterLogin(r.data.session);
 });
 async function afterLogin(session){
