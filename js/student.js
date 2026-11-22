@@ -1,17 +1,20 @@
 "use strict";
-/* 근본국어 학생 화면: 학번 + 개인 코드로 로그인 → 답안 제출, 내 결과, 누적 기록 */
+/* 근본국어 학생 화면: 학번 + 비밀번호로 로그인(처음 비밀번호는 학번, 첫 로그인 때 새로 정함) → 답안 제출, 내 결과, 누적 기록 */
 const sb=window.supabase.createClient(window.GB_CONFIG.url,window.GB_CONFIG.key,{auth:{persistSession:false}});
-const T={token:null,me:null,view:'home',cur:null,draft:{},results:null,confirm:false,busy:false,msg:''};
+const T={token:null,me:null,who:null,mustChange:false,view:'home',cur:null,draft:{},results:null,confirm:false,busy:false,msg:'',pwMsg:''};
 const TOKEN_KEY='gb-student-token';
 
-function saveToken(tok){T.token=tok;lsSet(TOKEN_KEY,tok?{tok,exp:Date.now()+11*3600e3}:null)}
-function loadToken(){const v=lsGet(TOKEN_KEY,null);return v&&v.exp>Date.now()?v.tok:null}
+function saveToken(tok,who){T.token=tok;T.who=tok?(who||null):null;lsSet(TOKEN_KEY,tok?{tok,exp:Date.now()+11*3600e3,who:T.who}:null)}
+function loadToken(){const v=lsGet(TOKEN_KEY,null);if(!(v&&v.exp>Date.now()))return null;T.who=v.who||null;return v.tok}
+// 임시 답안은 학번별로 따로 둔다(같은 기기를 여러 학생이 쓰는 경우 남의 마킹이 보이지 않게).
+const dkey=tid=>(T.me?.sid||T.who?.sid||'')+':'+tid;
 const fmtTime=s=>s?new Date(s).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
 
 async function rpc(fn,args){
   const r=await sb.rpc(fn,args);
   if(r.error){
-    if(/invalid_session/.test(r.error.message||'')){saveToken(null);T.me=null;T.view='home';T.msg='로그인 시간이 지났습니다. 다시 로그인해 주세요.';render();throw r.error}
+    if(/invalid_session/.test(r.error.message||'')){saveToken(null);T.me=null;T.mustChange=false;T.view='home';T.msg='로그인 시간이 지났습니다. 다시 로그인해 주세요.';render();throw r.error}
+    if(/must_change_password/.test(r.error.message||'')){T.mustChange=true;T.pwMsg='';render();throw r.error}
     throw r.error;
   }
   return r.data;
@@ -20,13 +23,25 @@ async function refreshHome(){T.me=await rpc('student_home',{p_token:T.token})}
 
 /* ---------- 화면 ---------- */
 function viewLogin(){
-  return `<div class="card" style="max-width:420px;margin:32px auto"><h2>학생 로그인</h2><p class="sub">학번과 선생님께 받은 개인 코드(6자리)를 입력하세요.</p>
+  return `<div class="card" style="max-width:420px;margin:32px auto"><h2>학생 로그인</h2><p class="sub">학번과 비밀번호를 입력하세요. 처음 로그인할 때 비밀번호는 <b>학번</b>이고, 들어가자마자 새 비밀번호를 정합니다.</p>
   <form id="stuLogin" class="stack" style="margin-top:14px"><label class="f">학번<input type="text" id="lgSid" inputmode="numeric" maxlength="5" autocomplete="username" placeholder="예: 10515" required></label>
-  <label class="f">개인 코드<input type="password" id="lgCode" maxlength="6" autocomplete="current-password" placeholder="6자리" required style="text-transform:uppercase"></label>
+  <label class="f">비밀번호<input type="password" id="lgCode" autocomplete="current-password" placeholder="처음에는 학번" required></label>
   <button class="btn primary" type="submit">로그인</button><p class="sub" id="lgMsg" role="status">${esc(T.msg)}</p></form></div>
   <p class="sub" style="text-align:center"><a href="teacher.html" style="color:var(--ink2)">교사 화면</a></p>`;
 }
-function head(){return `<div class="card"><div class="row" style="justify-content:space-between"><div><h2>${esc(T.me.name)}</h2><p class="sub">${esc(T.me.sid)}${T.me.class?' · '+esc(T.me.class):''}</p></div><div class="row"><button class="btn${T.view==='home'?' primary':''}" data-act="home">시험 목록</button><button class="btn${T.view==='history'?' primary':''}" data-act="history">내 누적 기록</button><button class="btn ghost" data-act="logout">로그아웃</button></div></div></div>`}
+function head(){return `<div class="card"><div class="row" style="justify-content:space-between"><div><h2>${esc(T.me.name)}</h2><p class="sub">${esc(T.me.sid)}${T.me.class?' · '+esc(T.me.class):''}</p></div><div class="row"><button class="btn${T.view==='home'?' primary':''}" data-act="home">시험 목록</button><button class="btn${T.view==='history'?' primary':''}" data-act="history">내 누적 기록</button><button class="btn ghost${T.view==='pw'?' primary':''}" data-act="pw">비밀번호 바꾸기</button><button class="btn ghost" data-act="logout">로그아웃</button></div></div></div>`}
+/* 비밀번호 정하기: forced=첫 로그인·초기화 직후(지금 비밀번호를 묻지 않음, 다른 화면으로 못 감) */
+function viewPw(forced){
+  const who=T.me||T.who||{};
+  return `${forced?'':head()}<div class="card" style="max-width:460px;${forced?'margin:32px auto':''}"><h2>${forced?'새 비밀번호 정하기':'비밀번호 바꾸기'}</h2>
+  <p class="sub">${forced?`${esc(who.name||'')} 학생, 지금 비밀번호는 학번이라 친구도 알 수 있습니다. 시험을 보기 전에 나만 아는 비밀번호로 바꿔 주세요.`:'지금 비밀번호를 확인한 뒤 새 비밀번호로 바꿉니다.'}</p>
+  <p class="sub" style="margin-top:6px">규칙: ${PW_MIN}자 이상, 학번과 다르게. 글자 종류는 상관없습니다.</p>
+  <form id="stuPw" class="stack" style="margin-top:14px">${forced?'':'<label class="f">지금 비밀번호<input type="password" id="pwOld" autocomplete="current-password" required></label>'}
+  <label class="f">새 비밀번호<input type="password" id="pwNew" autocomplete="new-password" required></label>
+  <label class="f">새 비밀번호 한 번 더<input type="password" id="pwNew2" autocomplete="new-password" required></label>
+  <button class="btn primary" type="submit">${forced?'저장하고 시작하기':'비밀번호 바꾸기'}</button><p class="sub" id="pwMsg" role="status" style="color:var(--bad)">${esc(T.pwMsg)}</p></form>
+  ${forced?'<div class="row" style="margin-top:6px"><button class="btn ghost small" data-act="logout">로그아웃</button></div>':''}</div>`;
+}
 function viewHome(){
   const ts=T.me.tests||[];
   if(!T.me.class)return head()+`<div class="card empty"><h2>아직 반이 정해지지 않았습니다</h2><p>선생님께 방과후 반 명단에 넣어 달라고 말씀드려 주세요.</p></div>`;
@@ -36,8 +51,10 @@ function viewHome(){
 function viewTake(){
   const t=(T.me.tests||[]).find(x=>x.id===T.cur);
   if(!t||!t.is_open){T.view='home';return viewHome()}
-  const n=t.items.length;
-  const dr=T.draft[t.id]||(T.draft[t.id]={a:(t.answers||'').padEnd(n,'0').slice(0,n),el:''});
+  const n=t.items.length;const dk=dkey(t.id);
+  // 저장해 둔 임시 답안의 길이가 지금 문항 수와 다르면(선생님이 문항 수를 고친 경우) 맞춰 준다. 다르면 제출이 거절된다.
+  if(T.draft[dk]&&T.draft[dk].a.length!==n)T.draft[dk].a=T.draft[dk].a.padEnd(n,'0').slice(0,n);
+  const dr=T.draft[dk]||(T.draft[dk]={a:(t.answers||'').padEnd(n,'0').slice(0,n),el:''});
   const blanks=dr.a.split('').filter(c=>c==='0').length;
   return head()+omrCard(t,dr,null,false)+`<div class="card"><div class="row" style="justify-content:space-between"><div><b>${t.submitted_at?'이미 냈습니다. 고쳐서 다시 낼 수 있습니다.':'다 마킹했으면 제출하세요.'}</b><p class="sub" id="blankInfo">빈 문항 ${blanks}개</p></div>
   <div class="row">${T.confirm?`<span class="confirm">빈 문항 ${blanks}개가 있습니다. 그대로 낼까요? <button class="btn small red" data-act="submit-yes">제출</button><button class="btn small ghost" data-act="submit-no">계속 마킹</button></span>`:`<button class="btn red" data-act="submit" ${T.busy?'disabled':''}>답안 제출</button>`}<button class="btn ghost" data-act="home">목록으로</button></div></div></div>`;
@@ -48,7 +65,7 @@ function viewResult(){
   const row=(T.results||[]).find(x=>x.id===T.cur);
   if(!row)return head()+`<div class="card empty"><h2>결과를 불러오는 중입니다</h2></div>`;
   if(!row.answers)return head()+`<div class="card empty"><h2>${esc(row.title)}: 낸 답안이 없습니다</h2><p>종이로 냈다면 선생님이 입력하신 뒤에 결과가 보입니다.</p></div>`;
-  const t={title:row.title,items:row.items};const key=row.key.split('');const cls=clsOf(row);
+  const t={title:row.title,items:row.items};const key=(row.key||'').split('');const cls=clsOf(row);
   const r=report(t,key,{a:row.answers,el:''},cls);
   const card=(x,extra)=>`<div class="focus-item"><div class="qno">${esc(x.no)}</div><div style="min-width:0">${esc(x.area)} · ${esc(x.type||'')}<div class="why"><span class="pill" style="color:var(--bad)">내 답 ${x.mine==='0'?'무응답':CIR[+x.mine]}</span><span class="pill" style="color:var(--s1)">정답 ${CIR[+x.ans]}</span></div>${extra||''}</div><div class="num" style="text-align:right">${x.rate!=null?'반 '+pct(x.rate):''}${x.nr!=null?`<br><span class="muted">전국 ${pct(x.nr)}</span>`:''}</div></div>`;
   return head()+`<div class="card"><h2>${esc(row.title)} 결과</h2><div class="tiles" style="margin-top:10px"><div class="tile"><div class="k">내 점수</div><div class="v">${r.score}<small> / ${r.max}</small></div></div><div class="tile"><div class="k">반 평균 (100점 환산)</div><div class="v">${cls.avgPct!=null?Math.round(cls.avgPct*100):'–'}<small> 점</small></div></div><div class="tile"><div class="k">틀린 문항</div><div class="v">${r.wrong.length}<small> 개</small></div></div></div></div>
@@ -71,7 +88,9 @@ function viewHistory(){
 }
 function render(){
   const app=$('#app');
+  if(T.token&&T.mustChange){app.innerHTML=viewPw(true);return}
   if(!T.token||!T.me){app.innerHTML=viewLogin();return}
+  if(T.view==='pw'){app.innerHTML=`<div class="stack">${viewPw(false)}</div>`;return}
   app.innerHTML=`<div class="stack">${({home:viewHome,take:viewTake,result:viewResult,history:viewHistory}[T.view]||viewHome)()}</div>`;
 }
 
@@ -79,39 +98,56 @@ function render(){
 document.addEventListener('submit',async e=>{
   if(e.target.id!=='stuLogin')return;e.preventDefault();
   const msg=$('#lgMsg');msg.textContent='확인하는 중…';
-  const r=await sb.rpc('student_login',{p_sid:$('#lgSid').value.trim(),p_code:$('#lgCode').value.trim()});
+  const r=await sb.rpc('student_login',{p_sid:$('#lgSid').value.trim(),p_password:$('#lgCode').value.trim()});
   if(r.error){msg.textContent='서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요.';return}
   const d=r.data||{};
-  if(!d.ok){msg.textContent=d.error==='locked'?'여러 번 틀려서 10분 동안 잠겼습니다. 잠시 뒤 다시 시도해 주세요.':'학번 또는 코드가 맞지 않습니다.';return}
-  saveToken(d.token);T.msg='';
-  try{await refreshHome();T.view='home';render()}catch(err){}
+  if(!d.ok){msg.textContent=d.error==='locked'?'여러 번 틀려서 10분 동안 잠겼습니다. 잠시 뒤 다시 시도해 주세요.':'학번 또는 비밀번호가 맞지 않습니다. 비밀번호를 잊었으면 선생님께 초기화를 부탁하세요.';return}
+  saveToken(d.token,{sid:d.sid,name:d.name});T.msg='';T.pwMsg='';T.view='home';
+  if(d.must_change){T.mustChange=true;render();return}
+  try{await refreshHome();render()}catch(err){}
+});
+document.addEventListener('submit',async e=>{
+  if(e.target.id!=='stuPw')return;e.preventDefault();
+  const forced=T.mustChange;const nw=$('#pwNew').value,nw2=$('#pwNew2').value;const msg=$('#pwMsg');
+  const sid=(T.me||T.who||{}).sid||'';
+  const bad=pwProblem(nw,sid)||(nw!==nw2?'새 비밀번호 두 칸이 서로 다릅니다.':'');
+  if(bad){T.pwMsg=bad;msg.textContent=bad;return}
+  msg.textContent='저장하는 중…';
+  try{
+    const d=await rpc('student_change_password',forced?{p_token:T.token,p_new:nw}:{p_token:T.token,p_new:nw,p_old:$('#pwOld').value});
+    if(!d.ok){T.pwMsg={wrong_old:'지금 비밀번호가 맞지 않습니다.',too_short:`비밀번호는 ${PW_MIN}자 이상이어야 합니다.`,too_long:'비밀번호가 너무 깁니다. 조금 짧게 정해 주세요.',same_as_sid:'학번과 같은 비밀번호는 쓸 수 없습니다.'}[d.error]||'바꾸지 못했습니다. 다시 시도해 주세요.';msg.textContent=T.pwMsg;return}
+    T.mustChange=false;T.pwMsg='';T.view='home';toast('새 비밀번호를 저장했습니다');
+    await refreshHome();render();
+  }catch(err){if(!/invalid_session/.test(err?.message||''))msg.textContent='서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요.'}
 });
 document.addEventListener('click',async e=>{
   const b=e.target.closest('[data-act]');if(!b)return;const v=b.dataset.v;
   try{switch(b.dataset.act){
     case 'home':T.view='home';T.confirm=false;await refreshHome();render();break;
     case 'take':T.cur=v;T.view='take';T.confirm=false;render();break;
-    case 'mark':{const dr=T.draft[T.cur];const i=+b.dataset.i;const arr=dr.a.split('');arr[i]=arr[i]===v?'0':v;dr.a=arr.join('');b.parentElement.querySelectorAll('.bub').forEach(x=>x.setAttribute('aria-pressed',arr[i]===x.dataset.v));lsSet('gb-draft',T.draft);const bl=$('#blankInfo');if(bl)bl.textContent='빈 문항 '+arr.filter(c=>c==='0').length+'개';break}
-    case 'submit':{const dr=T.draft[T.cur];if(dr.a.includes('0')){T.confirm=true;render();break}await submit();break}
+    case 'pw':T.view='pw';T.pwMsg='';render();break;
+    case 'mark':{const dr=T.draft[dkey(T.cur)];const i=+b.dataset.i;const arr=dr.a.split('');arr[i]=arr[i]===v?'0':v;dr.a=arr.join('');b.parentElement.querySelectorAll('.bub').forEach(x=>x.setAttribute('aria-pressed',arr[i]===x.dataset.v));lsSet('gb-draft',T.draft);const bl=$('#blankInfo');if(bl)bl.textContent='빈 문항 '+arr.filter(c=>c==='0').length+'개';break}
+    case 'submit':{const dr=T.draft[dkey(T.cur)];if(dr.a.includes('0')){T.confirm=true;render();break}await submit();break}
     case 'submit-yes':T.confirm=false;await submit();break;
     case 'submit-no':T.confirm=false;render();break;
     case 'result':T.cur=v;T.view='result';if(!T.results)render();T.results=await rpc('student_results',{p_token:T.token,p_test:null});render();break;
     case 'history':T.view='history';render();T.results=await rpc('student_results',{p_token:T.token,p_test:null});render();break;
-    case 'logout':try{await sb.rpc('student_logout',{p_token:T.token})}catch(_){}saveToken(null);T.me=null;T.results=null;T.msg='';render();break;
-  }}catch(err){console.error(err);if(!/invalid_session/.test(err?.message||''))toast('문제가 생겼습니다. 잠시 뒤 다시 시도해 주세요.')}
+    case 'logout':try{await sb.rpc('student_logout',{p_token:T.token})}catch(_){}saveToken(null);T.me=null;T.mustChange=false;T.results=null;T.msg='';T.view='home';render();break;
+  }}catch(err){console.error(err);if(!/invalid_session|must_change_password/.test(err?.message||''))toast('문제가 생겼습니다. 잠시 뒤 다시 시도해 주세요.')}
 });
 async function submit(){
   T.busy=true;render();
-  const dr=T.draft[T.cur];
+  const dr=T.draft[dkey(T.cur)];
   try{const d=await rpc('student_submit',{p_token:T.token,p_test:T.cur,p_answers:dr.a});
-    if(d.ok){toast('제출했습니다');delete T.draft[T.cur];lsSet('gb-draft',T.draft);await refreshHome();T.view='home'}
+    if(d.ok){toast('제출했습니다');delete T.draft[dkey(T.cur)];lsSet('gb-draft',T.draft);await refreshHome();T.view='home'}
     else toast(d.error==='closed'?'응시가 닫혀서 낼 수 없습니다':'답안 형식이 맞지 않습니다. 새로고침 뒤 다시 시도해 주세요');
   }finally{T.busy=false;render()}
 }
 (async function boot(){
   T.draft=lsGet('gb-draft',{})||{};
+  for(const k of Object.keys(T.draft))if(!k.includes(':'))delete T.draft[k];// 예전 형식(학번 없는) 임시 답안은 버림
   loadSite(sb,'student');
   const tok=loadToken();
-  if(tok){T.token=tok;try{await refreshHome()}catch(_){T.token=null}}
+  if(tok){T.token=tok;try{await refreshHome()}catch(err){if(!T.mustChange)T.token=null}}
   render();
 })();

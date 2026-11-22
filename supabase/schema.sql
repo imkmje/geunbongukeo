@@ -6,6 +6,8 @@
 --  * 모든 표에 RLS를 켠다. 공개 키(anon)만으로는 어떤 표도 직접 읽거나 쓸 수 없다.
 --  * 교사: teachers 표에 등록된 로그인 계정만 모든 표를 읽고 쓴다.
 --  * 학생: 표를 직접 만지지 못하고, 아래 student_* 함수만 부를 수 있다.
+--  * 학생 비밀번호: 처음(또는 교사가 초기화한 뒤)에는 학번과 같다. 그 상태로 로그인하면
+--    새 비밀번호(6자 이상, 학번과 다름)를 정하기 전에는 시험 목록·제출·결과 함수가 모두 거절된다.
 
 create extension if not exists pgcrypto with schema extensions;
 
@@ -26,7 +28,8 @@ create table if not exists public.students (
   sid          text not null unique check (sid ~ '^[0-9]{5}$'),   -- 학번 5자리
   name         text not null check (length(trim(name)) between 1 and 30),
   class_id     uuid references public.classes(id) on delete set null,
-  code_hash    text,                                               -- 개인 코드(암호화)
+  code_hash    text,                                               -- 비밀번호(bcrypt). 이름은 예전 '개인 코드' 때 그대로
+  must_change_pw boolean not null default true,                    -- true면 로그인 직후 새 비밀번호를 정해야 함
   fail_count   int  not null default 0,
   locked_until timestamptz,
   created_at   timestamptz not null default now()
@@ -77,8 +80,52 @@ create table if not exists public.student_sessions (
   expires_at timestamptz not null default now() + interval '12 hours'
 );
 
+-- 예전 버전에서 만든 표에 새 칸 추가
+alter table public.students add column if not exists must_change_pw boolean not null default true;
+
 create index if not exists submissions_student_idx on public.submissions(student_id);
 create index if not exists students_class_idx on public.students(class_id);
+
+-- ───────────────────────── 학생 비밀번호: 기본값과 한 번만 하는 옮기기 ─────────────────────────
+-- 새로 들어온 학생(명단 붙여넣기)은 비밀번호 = 학번, 첫 로그인 때 바꾸게 한다.
+create or replace function public._students_default_pw()
+returns trigger language plpgsql security definer
+set search_path = public, extensions
+as $$
+begin
+  if new.code_hash is null then
+    new.code_hash := crypt(new.sid, gen_salt('bf', 8));
+    new.must_change_pw := true;
+  end if;
+  return new;
+end $$;
+drop trigger if exists students_default_pw on public.students;
+create trigger students_default_pw before insert on public.students
+  for each row execute function public._students_default_pw();
+
+-- 이미 실행한 옮기기를 기록하는 표(교사·학생 모두 직접 못 읽음)
+create table if not exists public.schema_migrations (
+  name   text primary key,
+  run_at timestamptz not null default now()
+);
+alter table public.schema_migrations enable row level security;
+
+-- 개인 코드 → 비밀번호 옮기기: 이 파일을 처음 다시 실행할 때 딱 한 번만,
+-- 기존 학생 모두의 비밀번호를 학번으로 바꾸고 첫 로그인 때 새로 정하게 한다. 로그인 중인 학생은 모두 로그아웃된다.
+-- (두 번째 실행부터는 건너뛰므로, 학생이 바꾼 비밀번호가 다시 학번으로 돌아가지 않는다.)
+do $$
+begin
+  if not exists (select 1 from public.schema_migrations where name = 'student_pw_v1') then
+    update public.students
+       set code_hash = extensions.crypt(sid, extensions.gen_salt('bf', 8)),
+           must_change_pw = true, fail_count = 0, locked_until = null;
+    delete from public.student_sessions;
+    insert into public.schema_migrations(name) values ('student_pw_v1');
+  end if;
+end $$;
+
+-- 예전 개인 코드 발급 함수는 더 쓰지 않는다.
+drop function if exists public.teacher_issue_codes(uuid, uuid, boolean);
 
 -- ───────────────────────── 교사 판별 ─────────────────────────
 create or replace function public.is_teacher()
@@ -133,8 +180,21 @@ begin
   return s;
 end $$;
 
--- 로그인: 학번 + 코드. 5번 틀리면 10분 잠금.
-create or replace function public.student_login(p_sid text, p_code text)
+-- 위와 같지만, 비밀번호를 아직 바꾸지 않았으면 거절한다(시험 목록·제출·결과용).
+create or replace function public._session_student_ready(p_token uuid)
+returns public.students language plpgsql stable security definer
+set search_path = public
+as $$
+declare s public.students;
+begin
+  s := public._session_student(p_token);
+  if s.must_change_pw then raise exception 'must_change_password' using errcode = '28000'; end if;
+  return s;
+end $$;
+
+-- 로그인: 학번 + 비밀번호. 5번 틀리면 10분 잠금. must_change가 true면 학생 화면이 비밀번호 바꾸기부터 보여 준다.
+drop function if exists public.student_login(text, text);
+create or replace function public.student_login(p_sid text, p_password text)
 returns json language plpgsql volatile security definer
 set search_path = public, extensions
 as $$
@@ -148,11 +208,11 @@ begin
   if s.locked_until is not null and s.locked_until > now() then
     return json_build_object('ok', false, 'error', 'locked', 'until', s.locked_until);
   end if;
-  if s.code_hash = crypt(upper(trim(p_code)), s.code_hash) then
+  if s.code_hash = crypt(trim(p_password), s.code_hash) then
     update public.students set fail_count = 0, locked_until = null where id = s.id;
     delete from public.student_sessions where expires_at < now();
     insert into public.student_sessions(student_id) values (s.id) returning token into tok;
-    return json_build_object('ok', true, 'token', tok, 'sid', s.sid, 'name', s.name);
+    return json_build_object('ok', true, 'token', tok, 'sid', s.sid, 'name', s.name, 'must_change', s.must_change_pw);
   end if;
   update public.students
      set fail_count   = case when fail_count + 1 >= 5 then 0 else fail_count + 1 end,
@@ -174,7 +234,7 @@ set search_path = public
 as $$
 declare s public.students; cls text;
 begin
-  s := public._session_student(p_token);
+  s := public._session_student_ready(p_token);
   select name into cls from public.classes where id = s.class_id;
   return json_build_object(
     'sid', s.sid, 'name', s.name, 'class', cls,
@@ -197,7 +257,7 @@ set search_path = public
 as $$
 declare s public.students; n int;
 begin
-  s := public._session_student(p_token);
+  s := public._session_student_ready(p_token);
   if not exists (select 1 from public.test_class where test_id = p_test and class_id = s.class_id and is_open) then
     return json_build_object('ok', false, 'error', 'closed');
   end if;
@@ -219,7 +279,7 @@ set search_path = public
 as $$
 declare s public.students;
 begin
-  s := public._session_student(p_token);
+  s := public._session_student_ready(p_token);
   return coalesce((
     select json_agg(json_build_object(
              'id', t.id, 'title', t.title, 'test_date', t.test_date, 'items', t.items,
@@ -234,31 +294,46 @@ begin
        and (p_test is null or t.id = p_test)), '[]'::json);
 end $$;
 
--- ───────────────────────── 교사용 함수 ─────────────────────────
--- 개인 코드 생성: 반 전체(p_class) 또는 한 학생(p_student). 새 코드는 이때 한 번만 보여 준다.
-create or replace function public.teacher_issue_codes(p_class uuid default null, p_student uuid default null, p_only_missing boolean default false)
-returns table(sid text, name text, code text) language plpgsql volatile security definer
+-- 비밀번호 바꾸기. 처음(must_change) 상태면 지금 비밀번호를 묻지 않고, 아니면 지금 비밀번호가 맞아야 한다.
+-- 규칙: 앞뒤 빈칸을 뺀 길이 6자 이상·72바이트 이하(한글은 24자 정도), 학번과 같으면 안 됨(js/logic.js의 pwProblem과 같은 규칙).
+-- 바꾸면 이 학생의 다른 로그인은 모두 끊긴다(먼저 들어와 있던 다른 사람을 내보냄).
+create or replace function public.student_change_password(p_token uuid, p_new text, p_old text default null)
+returns json language plpgsql volatile security definer
 set search_path = public, extensions
 as $$
-declare r record; c text; alphabet text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; i int;
+declare s public.students; pw text := trim(coalesce(p_new, ''));
 begin
-  if not public.is_teacher() then raise exception 'not_teacher' using errcode = '42501'; end if;
-  for r in select st.id, st.sid, st.name, st.code_hash from public.students st
-            where (p_student is not null and st.id = p_student)
-               or (p_student is null and st.class_id = p_class)
-            order by st.sid loop
-    if p_only_missing and r.code_hash is not null then continue; end if;
-    c := '';
-    for i in 1..6 loop
-      c := c || substr(alphabet, 1 + (get_byte(gen_random_bytes(1), 0) % length(alphabet)), 1);
-    end loop;
-    update public.students set code_hash = crypt(c, gen_salt('bf', 8)), fail_count = 0, locked_until = null where id = r.id;
-    delete from public.student_sessions where student_id = r.id;
-    sid := r.sid; name := r.name; code := c;
-    return next;
-  end loop;
+  s := public._session_student(p_token);
+  if not s.must_change_pw and (p_old is null or s.code_hash <> crypt(trim(p_old), s.code_hash)) then
+    perform pg_sleep(0.4);
+    return json_build_object('ok', false, 'error', 'wrong_old');
+  end if;
+  if length(pw) < 6 then return json_build_object('ok', false, 'error', 'too_short'); end if;
+  if octet_length(pw) > 72 then return json_build_object('ok', false, 'error', 'too_long'); end if;  -- bcrypt 한계(바이트)
+  if pw = s.sid then return json_build_object('ok', false, 'error', 'same_as_sid'); end if;
+  update public.students set code_hash = crypt(pw, gen_salt('bf', 8)), must_change_pw = false,
+         fail_count = 0, locked_until = null where id = s.id;
+  delete from public.student_sessions where student_id = s.id and token <> p_token;
+  return json_build_object('ok', true);
 end $$;
 
+-- ───────────────────────── 교사용 함수 ─────────────────────────
+-- 비밀번호 초기화: 한 학생의 비밀번호를 학번으로 되돌리고, 다음 로그인 때 새로 정하게 한다. 잠금도 풀린다.
+-- 교사 계정(teachers 표)만 부를 수 있다. 반에 속한 학생만 대상으로 한다.
+create or replace function public.teacher_reset_password(p_student uuid)
+returns json language plpgsql volatile security definer
+set search_path = public, extensions
+as $$
+declare s public.students;
+begin
+  if not public.is_teacher() then raise exception 'not_teacher' using errcode = '42501'; end if;
+  select * into s from public.students where id = p_student and class_id is not null;
+  if not found then return json_build_object('ok', false, 'error', 'not_found'); end if;
+  update public.students set code_hash = crypt(s.sid, gen_salt('bf', 8)), must_change_pw = true,
+         fail_count = 0, locked_until = null where id = s.id;
+  delete from public.student_sessions where student_id = s.id;
+  return json_build_object('ok', true, 'sid', s.sid, 'name', s.name);
+end $$;
 -- 무료 프로젝트 일시 정지 방지용(.github/workflows/keepalive.yml이 매일 부른다). 데이터는 읽지 않는다.
 create or replace function public.keepalive()
 returns timestamptz language sql stable
@@ -273,8 +348,9 @@ grant execute on function public.student_logout(uuid) to anon, authenticated;
 grant execute on function public.student_home(uuid) to anon, authenticated;
 grant execute on function public.student_submit(uuid, uuid, text) to anon, authenticated;
 grant execute on function public.student_results(uuid, uuid) to anon, authenticated;
-grant execute on function public.teacher_issue_codes(uuid, uuid, boolean) to authenticated;
--- _session_student는 아무에게도 주지 않는다(다른 함수 안에서만 쓰임).
+grant execute on function public.student_change_password(uuid, text, text) to anon, authenticated;
+grant execute on function public.teacher_reset_password(uuid) to authenticated;
+-- _session_student, _session_student_ready, _students_default_pw는 아무에게도 주지 않는다(안에서만 쓰임).
 
 -- ───────────────────────── 교사 등록 (따로 한 번 실행) ─────────────────────────
 -- Authentication → Users에서 교사 계정을 만든 뒤, 아래 줄의 이메일을 바꿔 실행한다.

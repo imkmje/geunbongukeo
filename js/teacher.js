@@ -2,7 +2,7 @@
 /* ---------- 상태 ---------- */
 const S={
   ready:false, err:null, slow:false,
-  session:null, teacher:false, preview:false, idx:{classByName:{},studentBySid:{},studentById:{}}, codes:null,
+  session:null, teacher:false, preview:false, idx:{classByName:{},studentBySid:{},studentById:{}}, pwCls:null,
   live:{tests:{},keys:{},stats:{},subs:{},manual:{},config:{},roster:{}},
   demo:null, me:null,
   tab:'class', selTest:null, selStudent:null, sortBy:'no',
@@ -39,7 +39,7 @@ function ident(n){const m=String(n).match(/\d{5}/);return m?m[0]:normName(n)}
 function rosterLists(){return D().roster?.main?.lists||{}}
 function rosterIndex(){const o={};for(const [c,l] of Object.entries(rosterLists()))for(const p of l)o[p.id]={...p,cls:c};return o}
 function parseRoster(text){const out=[],seen=new Set(),bad=[];for(const raw of text.split(/\n/)){const line=raw.trim();if(!line)continue;const m=line.match(/(?:^|\D)(\d{5})(?!\d)[\s,\t|]*([가-힣]{2,5})/);if(!m){if(/\d{5}/.test(line))bad.push(line.slice(0,20));continue}if(seen.has(m[1]))continue;seen.add(m[1]);out.push({id:m[1],name:m[2]})}return {out,bad,dup:[]}}
-function rosterEditor(c){const cur=rosterLists()[c]||[];const pv=S.rosterPv;return `<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px"><h3>${esc(c)} 명단</h3><p class="sub" style="margin-bottom:8px">수강생 목록 표를 통째로 복사해 붙여넣으면 학번(5자리)과 이름만 골라 읽습니다. 순번·신청시간 같은 다른 칸과 머리글 줄은 무시합니다. 저장하면 이 반의 명단이 붙여넣은 내용으로 바뀝니다.</p><textarea id="rosterText" rows="7" placeholder="1  10515  홍길동  2026-09-16 16:30:02&#10;2  10505  김하늘  2026-09-16 16:30:02">${esc(S.rosterText||cur.map(p=>p.id+' '+p.name).join('\n'))}</textarea><div class="row" style="margin-top:8px"><button class="btn" data-act="ros-parse">확인하기</button>${pv?`<button class="btn primary" data-act="ros-save" data-v="${esc(c)}" ${pv.out.length?'':'disabled'}>${pv.out.length}명으로 저장</button>`:''}<button class="btn ghost" data-act="ros-close">닫기</button></div>${pv?`<p class="sub" style="margin-top:8px">${pv.out.length}명 읽음${pv.dup.length?` · 다른 반 명단에도 있는 학번 ${pv.dup.length}개(${esc(pv.dup.join(', '))})`:''}${pv.bad.length?` · 읽지 못한 줄 ${pv.bad.length}개(${esc(pv.bad.slice(0,3).join(' / '))})`:''}</p>`:''}</div>`}
+function rosterEditor(c){const cur=rosterLists()[c]||[];const pv=S.rosterPv;return `<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px"><h3>${esc(c)} 명단</h3><p class="sub" style="margin-bottom:8px">수강생 목록 표를 통째로 복사해 붙여넣으면 학번(5자리)과 이름만 골라 읽습니다. 순번·신청시간 같은 다른 칸과 머리글 줄은 무시합니다. 저장하면 이 반의 명단이 붙여넣은 내용으로 바뀝니다. 새로 들어온 학생의 처음 비밀번호는 학번입니다.</p><textarea id="rosterText" rows="7" placeholder="1  10515  홍길동  2026-09-16 16:30:02&#10;2  10505  김하늘  2026-09-16 16:30:02">${esc(S.rosterText||cur.map(p=>p.id+' '+p.name).join('\n'))}</textarea><div class="row" style="margin-top:8px"><button class="btn" data-act="ros-parse">확인하기</button>${pv?`<button class="btn primary" data-act="ros-save" data-v="${esc(c)}" ${pv.out.length?'':'disabled'}>${pv.out.length}명으로 저장</button>`:''}<button class="btn ghost" data-act="ros-close">닫기</button></div>${pv?`<p class="sub" style="margin-top:8px">${pv.out.length}명 읽음${pv.dup.length?` · 다른 반 명단에도 있는 학번 ${pv.dup.length}개(${esc(pv.dup.join(', '))})`:''}${pv.bad.length?` · 읽지 못한 줄 ${pv.bad.length}개(${esc(pv.bad.slice(0,3).join(' / '))})`:''}</p>`:''}</div>`}
 function buildStats(tid){const t=D().tests[tid];const key=keyOf(tid);const all=toStats(analyze(t,key,recordsFor(tid,'')));const byClass={};for(const c of classes()){const rs=recordsFor(tid,c);if(rs.length)byClass[c]=toStats(analyze(t,key,rs))}const k=D().keys[tid]||{};return {all,byClass,nat:k.nat||null,ex:k.ex||null,tags:k.tags||null,at:Date.now()}}
 function clsBar(){return `<div class="chips" style="margin-bottom:14px" role="group" aria-label="반 선택"><span class="sub" style="align-self:center;margin-right:4px">반</span>${['',...classes()].map(c=>`<button class="chip" aria-pressed="${S.cf===c}" data-act="cf" data-v="${esc(c)}">${c?esc(c):'전체'}</button>`).join('')}</div>`}
 
@@ -49,14 +49,15 @@ const chk=r=>{if(r.error)throw r.error;return r.data};
 const clsId=n=>S.idx.classByName[n];
 const nowIso=()=>new Date().toISOString();
 async function load(){
-  const names=['classes','students','tests','test_keys','test_class','submissions'];
-  const res=await Promise.all(names.map(t=>sb.from(t).select('*').limit(20000)));
-  const [cl,st,ts,tk,tc,sub]=res.map(chk);
+  // Supabase는 한 번에 최대 1000줄만 돌려주므로(.limit을 더 크게 줘도 마찬가지) 1000줄씩 나눠 끝까지 읽는다.
+  const ORD={classes:['id'],students:['id'],tests:['id'],test_keys:['test_id'],test_class:['test_id','class_id'],submissions:['id']};
+  const fetchAll=async t=>{const out=[];for(let from=0;;from+=1000){let q=sb.from(t).select('*');for(const c of ORD[t])q=q.order(c);const rows=chk(await q.range(from,from+999));out.push(...rows);if(rows.length<1000)return out}};
+  const [cl,st,ts,tk,tc,sub]=await Promise.all(Object.keys(ORD).map(fetchAll));
   cl.sort((a,b)=>(a.created_at||'').localeCompare(b.created_at||''));
   const cById={};const idx={classByName:{},studentBySid:{},studentById:{}};
   for(const c of cl){cById[c.id]=c.name;idx.classByName[c.name]=c.id}
   const L={tests:{},keys:{},stats:{},subs:{},manual:{},config:{main:{classes:cl.map(c=>c.name)}},roster:{main:{lists:{}}}};
-  for(const x of st){idx.studentBySid[x.sid]=x;idx.studentById[x.id]=x;const cn=cById[x.class_id];if(cn)(L.roster.main.lists[cn]=L.roster.main.lists[cn]||[]).push({id:x.sid,name:x.name,has_code:!!x.code_hash})}
+  for(const x of st){idx.studentBySid[x.sid]=x;idx.studentById[x.id]=x;const cn=cById[x.class_id];if(cn)(L.roster.main.lists[cn]=L.roster.main.lists[cn]||[]).push({id:x.sid,name:x.name,uid:x.id,must:x.must_change_pw!==false,locked:!!x.locked_until&&Date.parse(x.locked_until)>Date.now()})}
   for(const l of Object.values(L.roster.main.lists))l.sort((a,b)=>a.id.localeCompare(b.id));
   for(const t of ts)L.tests[t.id]={title:t.title,date:t.test_date||'',items:t.items||[],openFor:[],releasedFor:[],closedOnce:false,key:''};
   for(const r of tc){const T=L.tests[r.test_id];const n=cById[r.class_id];if(!T||!n)continue;if(r.is_open)T.openFor.push(n);if(r.released)T.releasedFor.push(n);if(r.closed_once)T.closedOnce=true;
@@ -71,14 +72,16 @@ async function api(fn,okMsg){
   try{await fn();await load();render();if(okMsg)toast(okMsg);return true}
   catch(e){console.error(e);toast('저장하지 못했습니다: '+(e?.message||e));return false}
 }
-async function issueCodes(cls,{only=false,student=null}={}){
-  if(S.demo){toast('예시 데이터에서는 코드를 만들지 않습니다');return}
-  const r=await sb.rpc('teacher_issue_codes',student?{p_student:student}:{p_class:clsId(cls),p_only_missing:only});
-  if(r.error){toast('코드를 만들지 못했습니다: '+r.error.message);return}
-  S.codes={cls,rows:r.data||[]};await load();render();
+async function resetPw(uid){
+  if(S.demo){toast('예시 데이터에서는 바꾸지 않습니다');return}
+  const st=S.idx.studentById[uid];
+  const r=await sb.rpc('teacher_reset_password',{p_student:uid});
+  if(r.error||!r.data?.ok){toast('초기화하지 못했습니다: '+(r.error?.message||'명단에서 학생을 찾지 못했습니다'));return}
+  await load();render();toast((st?st.sid+' '+st.name:'학생')+'의 비밀번호를 학번으로 되돌렸습니다');
 }
-function codeSheet(){const C=S.codes;return `<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px"><h3>${esc(C.cls)} 개인 코드</h3>${C.rows.length?`<p class="sub" style="margin-bottom:8px"><b>이 목록은 지금 한 번만 보입니다.</b> 복사해서 인쇄하거나 학생에게 나눠 주세요. 잃어버린 학생은 새로 발급하면 됩니다(이전 코드는 쓸 수 없게 됩니다).</p><div class="tbl-wrap"><table><thead><tr><th>학번</th><th>이름</th><th>코드</th></tr></thead><tbody>${C.rows.map(r=>`<tr><td class="mono">${esc(r.sid)}</td><td>${esc(r.name)}</td><td class="mono"><b>${esc(r.code)}</b></td></tr>`).join('')}</tbody></table></div><textarea id="codeText" class="code" rows="3" readonly style="margin-top:8px">${esc(C.rows.map(r=>r.sid+'\t'+r.name+'\t'+r.code).join('\n'))}</textarea><div class="row" style="margin-top:8px"><button class="btn primary" data-act="codes-copy">표 복사</button>`:`<p class="sub">새로 발급할 학생이 없습니다. 모든 학생에게 이미 코드가 있습니다.</p><div class="row" style="margin-top:8px">`}${S.confirm==='reissue:'+C.cls?`<span class="confirm">반 전체의 코드를 바꿉니다. 이전 코드는 쓸 수 없게 됩니다 <button class="btn small red" data-act="codes-all" data-v="${esc(C.cls)}">새로 발급</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:`<button class="btn ghost" data-act="reissue" data-v="${esc(C.cls)}">이 반 전체 새로 발급</button>`}<input type="text" id="oneSid" placeholder="학번 한 명" style="width:110px" aria-label="코드를 새로 발급할 학번"><button class="btn ghost" data-act="codes-one">한 명 새로 발급</button><button class="btn ghost" data-act="codes-close">닫기</button></div></div>`}
-function viewLogin(){return `<div class="card" style="max-width:420px;margin:32px auto"><h2>교사 로그인</h2><p class="sub">Supabase에 만든 교사 계정으로 들어갑니다.</p><form id="loginForm" class="stack" style="margin-top:14px"><label class="f">아이디 또는 이메일<input type="text" id="lgEmail" autocomplete="username" autocapitalize="off" spellcheck="false" required></label><label class="f">비밀번호<input type="password" id="lgPw" autocomplete="current-password" required></label><button class="btn primary" type="submit">로그인</button><p class="sub" id="lgMsg" role="status"></p></form><div class="row" style="margin-top:6px"><a class="btn ghost small" href="./">학생 화면으로</a></div></div>`}
+/* 반 학생 비밀번호 상태와 초기화 버튼 */
+function pwSheet(c){const l=rosterLists()[c]||[];return `<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px"><h3>${esc(c)} 학생 비밀번호</h3><p class="sub" style="margin-bottom:8px">처음 비밀번호는 <b>학번</b>입니다. 학생은 처음 로그인하자마자 새 비밀번호(6자 이상, 학번과 다르게)를 정해야 시험을 볼 수 있습니다. 비밀번호를 잊은 학생은 <b>비밀번호 초기화</b>를 누르면 다시 학번으로 돌아가고, 잠금도 풀립니다.</p>${l.length?`<div class="tbl-wrap"><table><thead><tr><th>학번</th><th>이름</th><th>상태</th><th></th></tr></thead><tbody>${l.map(p=>{const cf=S.confirm==='pw:'+p.uid;return `<tr><td class="mono">${esc(p.id)}</td><td style="white-space:nowrap">${esc(p.name)}</td><td>${p.must?'<span class="pill closed">아직 학번 그대로</span>':'<span class="pill rel">직접 정함</span>'}${p.locked?' <span class="pill" style="color:var(--bad)">잠김</span>':''}</td><td>${cf?`<span class="confirm">${esc(p.name)} 학생의 비밀번호를 학번으로 되돌릴까요? <button class="btn small red" data-act="pw-reset-yes" data-v="${esc(p.uid)}">초기화</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:`<button class="btn small ghost" data-act="pw-reset" data-v="${esc(p.uid)}">비밀번호 초기화</button>`}</td></tr>`}).join('')}</tbody></table></div>`:'<p class="muted">명단에 학생이 없습니다.</p>'}<div class="row" style="margin-top:8px"><button class="btn ghost" data-act="pw-close">닫기</button></div></div>`}
+function viewLogin(){return `<div class="card" style="max-width:420px;margin:32px auto"><h2>교사 로그인</h2><form id="loginForm" class="stack" style="margin-top:14px"><label class="f">아이디 또는 이메일<input type="text" id="lgEmail" autocomplete="username" autocapitalize="off" spellcheck="false" required></label><label class="f">비밀번호<input type="password" id="lgPw" autocomplete="current-password" required></label><button class="btn primary" type="submit">로그인</button><p class="sub" id="lgMsg" role="status"></p></form><div class="row" style="margin-top:6px"><a class="btn ghost small" href="./">학생 화면으로</a></div></div>`}
 /* ---------- 렌더 스케줄 (입력 중에는 다시 그리지 않음) ---------- */
 let dirty=false;
 function busy(){const a=document.activeElement;return a&&$('#app').contains(a)&&(a.tagName==='TEXTAREA'||(a.tagName==='INPUT'&&a.type!=='button')||a.tagName==='SELECT')}
@@ -224,17 +227,17 @@ function newItems(kind,n){
 function startEdit(id){
   if(id){const t=D().tests[id];S.edit={id,title:t.title,date:t.date||'',items:JSON.parse(JSON.stringify(t.items)),key:keyOf(id).concat(Array(t.items.length).fill('0')).slice(0,t.items.length),nat:JSON.parse(JSON.stringify(natOf(id)||[])),ex:JSON.parse(JSON.stringify(D().keys[id]?.ex||[])),tags:JSON.parse(JSON.stringify(D().keys[id]?.tags||[]))}}
   else S.edit={id:null,title:'',date:new Date().toISOString().slice(0,10),items:newItems('single'),key:Array(45).fill('0'),nat:[],ex:[],tags:[]};
-  S.natText='';S.exText='';S.tagText='';
+  S.natText='';S.exText='';S.tagText='';confirmItems=false;
 }
 function viewManage(){
   if(S.edit)return viewEditor();
   const ts=testList();
   let h=`<div class="stack"><div class="card"><div class="row" style="justify-content:space-between"><div><h2>시험 회차</h2><p class="sub">회차를 만들고 정답을 넣은 뒤 응시를 열면, 학생 화면에 답안지가 나타납니다.</p></div><div class="row"><button class="btn primary" data-act="new-test">새 시험 만들기</button>${S.demo?'':'<button class="btn" data-act="demo-on">예시 데이터로 둘러보기</button>'}</div></div>`;
   if(!ts.length)h+=`<p class="note" style="margin-top:14px">아직 시험이 없습니다. <b>새 시험 만들기</b>를 누르면 45문항 틀이 미리 채워집니다. 영역 구분은 실제 시험지를 보고 맞춰 주세요.</p>`;
-  else h+=`<div class="tbl-wrap" style="margin-top:14px"><table><thead><tr><th>시험</th><th>상태</th><th class="n">답안</th><th>정답</th><th>전국 자료</th><th></th></tr></thead><tbody>${ts.map(t=>{const [c,l]=statusOf(t);const k=keyOf(t.id);const filled=t.items.filter((_,i)=>k[i]&&k[i]!=='0').length;const nat=natOf(t.id);const cf=S.confirm==='del:'+t.id;return `<tr><td><b>${esc(t.title)}</b><br><span class="muted">${esc(t.date||'')}</span></td><td>${classes().length?classes().map(cc=>{const [c2,l2]=statusOf(t,cc);return `<div><span class="pill ${c2}">${esc(cc)} ${l2}</span></div>`}).join(''):`<span class="pill ${c}">${l}</span>`}</td><td class="n">${recordsFor(t.id,'').length}</td><td class="num">${filled}/${t.items.length}</td><td>${nat&&nat.some(Boolean)?'있음':'<span class="muted">없음</span>'}</td><td><div class="row" style="gap:6px">${effClasses().map(c=>isOpen(t,c)?`<button class="btn small" data-act="close" data-v="${t.id}|${esc(c)}">${c?esc(c)+' ':''}응시 닫기</button>`:`<button class="btn small" data-act="open" data-v="${t.id}|${esc(c)}">${c?esc(c)+' ':''}응시 열기</button>`).join('')}<button class="btn small" data-act="edit" data-v="${t.id}">편집</button>${cf?`<span class="confirm">답안 기록은 남고 시험만 지워집니다 <button class="btn small red" data-act="del-yes" data-v="${t.id}">삭제</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:`<button class="btn small ghost" data-act="del" data-v="${t.id}">삭제</button>`}</div></td></tr>`}).join('')}</tbody></table></div>`;
+  else h+=`<div class="tbl-wrap" style="margin-top:14px"><table><thead><tr><th>시험</th><th>상태</th><th class="n">답안</th><th>정답</th><th>전국 자료</th><th></th></tr></thead><tbody>${ts.map(t=>{const [c,l]=statusOf(t);const k=keyOf(t.id);const filled=t.items.filter((_,i)=>k[i]&&k[i]!=='0').length;const nat=natOf(t.id);const cf=S.confirm==='del:'+t.id;return `<tr><td><b>${esc(t.title)}</b><br><span class="muted">${esc(t.date||'')}</span></td><td>${classes().length?classes().map(cc=>{const [c2,l2]=statusOf(t,cc);return `<div><span class="pill ${c2}">${esc(cc)} ${l2}</span></div>`}).join(''):`<span class="pill ${c}">${l}</span>`}</td><td class="n">${recordsFor(t.id,'').length}</td><td class="num">${filled}/${t.items.length}</td><td>${nat&&nat.some(Boolean)?'있음':'<span class="muted">없음</span>'}</td><td><div class="row" style="gap:6px">${effClasses().map(c=>isOpen(t,c)?`<button class="btn small" data-act="close" data-v="${t.id}|${esc(c)}">${c?esc(c)+' ':''}응시 닫기</button>`:`<button class="btn small" data-act="open" data-v="${t.id}|${esc(c)}">${c?esc(c)+' ':''}응시 열기</button>`).join('')}<button class="btn small" data-act="edit" data-v="${t.id}">편집</button>${cf?`<span class="confirm">이 시험에 낸 답안 기록도 함께 지워집니다 <button class="btn small red" data-act="del-yes" data-v="${t.id}">삭제</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:`<button class="btn small ghost" data-act="del" data-v="${t.id}">삭제</button>`}</div></td></tr>`}).join('')}</tbody></table></div>`;
   h+='</div>';
   {const x={...SITE_DEFAULT,...(S.site||{})};h+=`<div class="card"><h3>사이트 제목</h3><p class="sub" style="margin-bottom:10px">학생 화면과 교사 화면 맨 위에 보이는 제목과 그 위의 작은 설명 줄입니다.</p><div class="row" style="align-items:flex-end"><label class="f" style="flex:1;min-width:160px">제목<input type="text" id="siteTitle" maxlength="40" value="${esc(x.title)}"></label><label class="f" style="flex:2;min-width:200px">학생 화면 설명 줄<input type="text" id="siteStu" maxlength="60" value="${esc(x.student_subtitle)}"></label><label class="f" style="flex:2;min-width:200px">교사 화면 설명 줄<input type="text" id="siteTch" maxlength="60" value="${esc(x.teacher_subtitle)}"></label><button class="btn primary" data-act="site-save">제목 저장</button></div></div>`}
-  {const cl=classes();h+=`<div class="card"><h3>반 관리</h3><p class="sub" style="margin-bottom:10px">방과후 반을 만들면 반마다 응시를 열고 결과를 따로 공개하며, 분석도 반별로 볼 수 있습니다. 학생은 학번과 개인 코드로 로그인하면 자기 반의 시험만 봅니다.</p><div class="row">${cl.map(c=>S.confirm==='cls:'+c?`<span class="confirm">${esc(c)} 삭제(답안 기록은 남음) <button class="btn small red" data-act="cls-del-yes" data-v="${esc(c)}">삭제</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:`<span class="chip" style="cursor:default">${esc(c)} · ${(rosterLists()[c]||[]).length}명 ${(()=>{const l=rosterLists()[c]||[];const m=l.filter(p=>!p.has_code).length;return m?`<span class="pill closed">코드 없음 ${m}</span> `:''})()}<button class="btn small ghost" data-act="ros-edit" data-v="${esc(c)}">명단</button><button class="btn small ghost" data-act="codes" data-v="${esc(c)}">코드 발급</button><button class="btn small ghost" data-act="cls-del" data-v="${esc(c)}" aria-label="${esc(c)} 삭제">×</button></span>`).join('')}<input type="text" id="newCls" placeholder="예: 화목반" style="width:140px" aria-label="새 반 이름"><button class="btn small" data-act="cls-add">반 추가</button></div>${S.rosterEdit&&cl.includes(S.rosterEdit)?rosterEditor(S.rosterEdit):''}${S.codes&&cl.includes(S.codes.cls)?codeSheet():''}</div>`}
+  {const cl=classes();h+=`<div class="card"><h3>반 관리</h3><p class="sub" style="margin-bottom:10px">방과후 반을 만들면 반마다 응시를 열고 결과를 따로 공개하며, 분석도 반별로 볼 수 있습니다. 학생은 학번과 비밀번호로 로그인하면 자기 반의 시험만 봅니다(처음 비밀번호는 학번).</p><div class="row">${cl.map(c=>S.confirm==='cls:'+c?`<span class="confirm">${esc(c)} 삭제(답안 기록은 남음) <button class="btn small red" data-act="cls-del-yes" data-v="${esc(c)}">삭제</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:`<span class="chip" style="cursor:default">${esc(c)} · ${(rosterLists()[c]||[]).length}명 ${(()=>{const l=rosterLists()[c]||[];const m=l.filter(p=>p.locked).length;return m?`<span class="pill" style="color:var(--bad)">잠김 ${m}</span> `:''})()}<button class="btn small ghost" data-act="ros-edit" data-v="${esc(c)}">명단</button><button class="btn small ghost" data-act="pw-open" data-v="${esc(c)}">비밀번호</button><button class="btn small ghost" data-act="cls-del" data-v="${esc(c)}" aria-label="${esc(c)} 삭제">×</button></span>`).join('')}<input type="text" id="newCls" placeholder="예: 화목반" style="width:140px" aria-label="새 반 이름"><button class="btn small" data-act="cls-add">반 추가</button></div>${S.rosterEdit&&cl.includes(S.rosterEdit)?rosterEditor(S.rosterEdit):''}${S.pwCls&&cl.includes(S.pwCls)?pwSheet(S.pwCls):''}</div>`}
   if(ts.length){
     if(!S.importTest||!D().tests[S.importTest])S.importTest=ts[ts.length-1].id;
     const it=D().tests[S.importTest];
@@ -242,12 +245,12 @@ function viewManage(){
     h+=`<div class="grid2"><div class="card"><h3>종이 답안 입력</h3>
       <p class="sub" style="margin-bottom:10px">한 줄에 한 명씩 <span class="mono">학번 이름 답안</span> 또는 <span class="mono">학번 답안</span>으로 적습니다. 빈 칸은 0으로 적습니다. 반 명단에 있는 학번만 저장되며, 학생이 직접 낸 답안이 있으면 이것으로 바뀝니다.</p>
       <label class="f">이름·답안 줄이 들어갈 회차<select id="impTest" data-act="imp-test">${ts.map(t=>`<option value="${t.id}" ${t.id===S.importTest?'selected':''}>${esc(t.title)}</option>`).join('')}</select></label>
-            <textarea id="impText\" rows="7" style="margin-top:10px" placeholder="${hasElectives(it)?'20315 김하늘 3152413524135241352413524135241352413524135 언매':'20315 김하늘 315241352413524135241352413524135241352413524'}">${esc(S.importText)}</textarea>
+            <textarea id="impText" rows="7" style="margin-top:10px" placeholder="${hasElectives(it)?'20315 김하늘 3152413524135241352413524135241352413524135 언매':'20315 김하늘 315241352413524135241352413524135241352413524'}">${esc(S.importText)}</textarea>
       <div class="row" style="margin-top:8px"><button class="btn" data-act="imp-parse">확인하기</button>${pv&&pv.ok.length?`<button class="btn primary" data-act="imp-save">${pv.ok.length}명 저장</button>`:''}</div>
       ${pv?`<div style="margin-top:10px;font-size:13.5px">${pv.ok.map(o=>`<div>✓ ${esc(o.name)} · ${esc(D().tests[o.tid]?.title||'')} · ${o.cnt}문항${o.el?' · '+esc(o.el):''}${o.cls?' · '+esc(o.cls):''}</div>`).join('')}${pv.bad.map(b=>`<div style="color:var(--bad)">✗ ${esc(b)}</div>`).join('')}</div>`:''}
     </div><div class="card"><h3>${esc(it.title)} 제출 현황</h3>${(()=>{const rs=recordsFor(it.id,'');if(!rs.length)return '<p class="muted">아직 제출된 답안이 없습니다.</p>';return `<div class="tbl-wrap"><table><thead><tr><th>이름</th><th>경로</th><th>제출 시각</th><th></th></tr></thead><tbody>${rs.map(r=>{const cf=S.confirm==='rm:'+r.path+':'+it.id;return `<tr><td>${esc(r.name)}${r.cls?` <span class="muted">${esc(r.cls)}</span>`:''}</td><td>${r.src==='student'?'학생 직접':'교사 입력'}</td><td class="num muted">${r.at?new Date(r.at).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):''}</td><td>${cf?`<span class="confirm"><button class="btn small red" data-act="rm-yes" data-v="${esc(r.path)}">지우기</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:`<button class="btn small ghost" data-act="rm" data-v="${esc(r.path)}">지우기</button>`}</td></tr>`}).join('')}</tbody></table></div>`})()}</div></div>`;
   }
-  h+=`<div class="note"><b>학생에게 나눠 줄 것</b> 이 사이트 주소(교사 화면 말고 첫 화면)와 학번별 개인 코드입니다. 학생은 학번과 코드로 로그인해 자기 반에 열린 시험에 답을 내고, 결과가 공개되면 자기 결과와 누적 기록을 봅니다.</div></div>`;
+  h+=`<div class="note"><b>학생에게 나눠 줄 것</b> 이 사이트 주소(교사 화면 말고 첫 화면)뿐입니다. 초기 비밀번호는 학번이고, 학생은 처음 로그인할 때 새 비밀번호를 정합니다. 학생은 학번과 비밀번호로 로그인해 자기 반에 열린 시험에 답을 내고, 결과가 공개되면 자기 결과와 누적 기록을 봅니다.</div></div>`;
   return h;
 }
 function viewEditor(){
@@ -305,7 +308,7 @@ document.addEventListener('click',async e=>{
     case 'nat-apply':{S.natText=$('#natText').value;const res=parseNat(S.edit,S.natText);render();toast(res.ok+'문항 적용'+(res.meta?' · '+res.meta:'')+(res.bad.length?`, 읽지 못한 줄 ${res.bad.length}개(${res.bad.slice(0,3).join(', ')})`:''));break}
     case 'nat-clear':S.edit.nat=[];render();break;
     case 'range':{const E=S.edit;const a=+$('#rgFrom').value,z=+$('#rgTo').value,ar=$('#rgArea').value,ty=$('#rgType').value.trim(),se=$('#rgSet').value.trim();let n=0;E.items.forEach(it=>{const no=parseInt(it.no,10);if(no>=Math.min(a,z)&&no<=Math.max(a,z)){it.area=ar;if(ty)it.type=ty;if(se)it.set=se;n++}});render();toast(n+'문항을 '+ar+'(으)로 지정했습니다');break}
-    case 'ex-apply':{S.exText=$('#exText').value;const n=parseEx(S.edit,S.exText);render();toast(n+'문항에 해설을 넣었습니다');break}
+    case 'ex-apply':{S.exText=$('#exText').value;const r=parseEx(S.edit,S.exText);render();toast(r.n+'문항에 해설을 넣었습니다'+(r.mismatch.length?` · 해설의 정답이 입력한 정답과 다른 문항: ${r.mismatch.join(', ')}번`:'')+(r.cut.length?` · 너무 길어 뒷부분을 자른 문항: ${r.cut.join(', ')}번`:''));break}
     case 'ex-clear':S.edit.ex=[];render();break;
     case 'tag-apply':{S.tagText=$('#tagText').value;const n=parseTags(S.edit,S.tagText);render();toast(n+'문항에 꼬리표를 넣었습니다');break}
     case 'tag-clear':S.edit.tags=[];render();break;
@@ -313,16 +316,14 @@ document.addEventListener('click',async e=>{
     case 'cls-add':{const n=normName($('#newCls').value);if(!n)break;if(classes().includes(n)){toast('이미 있는 반입니다');break}await api(async()=>chk(await sb.from('classes').insert({name:n})),n+' 반을 추가했습니다');break}
     case 'cls-del':S.confirm='cls:'+v;render();break;
     case 'cls-del-yes':S.confirm=null;await api(async()=>chk(await sb.from('classes').delete().eq('id',clsId(v))),'반을 지웠습니다(학생과 답안 기록은 남습니다)');break;
-    case 'codes':await issueCodes(v,{only:true});break;
+    case 'pw-open':S.pwCls=v;S.rosterEdit=null;S.confirm=null;render();break;
+    case 'pw-close':S.pwCls=null;S.confirm=null;render();break;
+    case 'pw-reset':S.confirm='pw:'+v;render();break;
+    case 'pw-reset-yes':S.confirm=null;await resetPw(v);break;
     case 'site-save':{const v2={title:normName($('#siteTitle').value),student_subtitle:normName($('#siteStu').value),teacher_subtitle:normName($('#siteTch').value)};if(!v2.title){toast('제목을 적어 주세요');break}await api(async()=>chk(await sb.from('site_settings').update({...v2,updated_at:nowIso()}).eq('id',1).select()).length||(()=>{throw new Error('설정 표가 없습니다. Supabase에서 최신 schema.sql을 다시 실행해 주세요')})(),'제목을 저장했습니다');break}
-    case 'reissue':S.confirm='reissue:'+v;render();break;
-    case 'codes-all':S.confirm=null;await issueCodes(v,{only:false});break;
-    case 'codes-one':{const sid=($('#oneSid')?.value||'').trim();const st=S.idx.studentBySid[sid];if(!st){toast('명단에 없는 학번입니다');break}await issueCodes(S.codes.cls,{student:st.id});break}
-    case 'codes-copy':copy($('#codeText').value,$('#codeText'));break;
-    case 'codes-close':S.codes=null;render();break;
     case 'reload':S.ready=false;render();try{await load()}catch(e){toast('불러오지 못했습니다: '+(e?.message||e))}S.ready=true;render();break;
     case 'logout':await sb.auth.signOut();S.session=null;S.teacher=false;S.live={tests:{},keys:{},stats:{},subs:{},manual:{},config:{},roster:{}};render();break;
-    case 'ros-edit':S.rosterEdit=v;S.rosterText='';S.rosterPv=null;render();break;
+    case 'ros-edit':S.rosterEdit=v;S.pwCls=null;S.rosterText='';S.rosterPv=null;render();break;
     case 'ros-close':S.rosterEdit=null;S.rosterPv=null;S.rosterText='';render();break;
     case 'ros-parse':{S.rosterText=$('#rosterText').value;const p=parseRoster(S.rosterText);const ri=rosterIndex();p.dup=p.out.filter(x=>ri[x.id]&&ri[x.id].cls!==S.rosterEdit).map(x=>x.id);S.rosterPv=p;render();break}
     case 'ros-save':{const p=S.rosterPv;if(!p)break;const cid=clsId(v);const ok=await api(async()=>{chk(await sb.from('students').upsert(p.out.map(x=>({sid:x.id,name:x.name,class_id:cid})),{onConflict:'sid'}));const keep=new Set(p.out.map(x=>x.id));const gone=Object.values(S.idx.studentById).filter(x=>x.class_id===cid&&!keep.has(x.sid)).map(x=>x.id);if(gone.length)chk(await sb.from('students').update({class_id:null}).in('id',gone))},v+' 명단을 저장했습니다('+p.out.length+'명)');if(ok){S.rosterPv=null;S.rosterText='';S.rosterEdit=null;render()}break}
@@ -365,30 +366,7 @@ async function saveEdit(){
   if(ok){S.edit=null;S.selTest=id;S.importTest=id;render()}
 }
 let confirmItems=false;
-function parseNat(E,text){
-  let ok=0;const bad=[];const meta=[];
-  const byNo=no=>E.items.findIndex(it=>String(it.no)===String(no)&&!it.el);
-  for(const raw of text.split(/\n/)){const h=raw.trim().match(/^#\s*(정답|배점 3점 문항|영역|세트)\s*:\s*(.*)$/);if(!h)continue;
-    if(h[1]==='정답'){const ds=h[2].replace(/\(.*?\)/g,'').replace(/[^1-5]/g,'');if(ds.length){ds.split('').forEach((d,k)=>{if(k<E.items.length)E.key[k]=d});meta.push('정답 '+ds.length+'개')}}
-    if(h[1]==='배점 3점 문항'){const ns=(h[2].match(/\d+/g)||[]);if(ns.length){E.items.forEach(it=>{if(!it.el)it.pts=2});ns.forEach(n=>{const i=byNo(n);if(i>=0)E.items[i].pts=3});meta.push('3점 '+ns.length+'문항')}}
-    if(h[1]==='세트'){let c=0;for(const part of h[2].replace(/←.*$/,'').split('/')){const m=part.trim().match(/^(\d+)\s*[~\-–]\s*(\d+)\s*(.+)$/);if(!m)continue;const nm=m[3].trim();E.items.forEach(it=>{const no=parseInt(it.no,10);if(!it.el&&no>=+m[1]&&no<=+m[2]){it.set=nm;c++}})}if(c)meta.push('세트 '+c+'문항')}
-    if(h[1]==='영역'){let c=0;for(const part of h[2].replace(/←.*$/,'').split('/')){const m=part.trim().match(/^(\d+)\s*[~\-–]\s*(\d+)\s*(.+)$/);if(!m)continue;const ar=m[3].trim();E.items.forEach(it=>{const no=parseInt(it.no,10);if(!it.el&&no>=+m[1]&&no<=+m[2]){it.area=ar;c++}})}if(c)meta.push('영역 '+c+'문항')}}
-  for(const raw of text.split(/\n/)){const line=raw.trim();if(!line||line.startsWith('#'))continue;
-    const m=line.match(/^(화작|언매)?\s*(\d+)[번.]?\s+(.*)$/);if(!m){bad.push(line.slice(0,12));continue}
-    const el=m[1]||'';const nums=(m[3].match(/\d+(\.\d+)?/g)||[]).map(Number);
-    const i=E.items.findIndex(it=>String(it.no)===m[2]&&((it.el||'')===el||(!el&&!it.el)));
-    if(i<0||!nums.length){bad.push(line.slice(0,12));continue}
-    const sc=x=>x>1?x/100:x;E.nat[i]={r:sc(nums[0]),d:nums.length>=6?nums.slice(1,6).map(sc):null};ok++}
-  return {ok,bad,meta:meta.join(', ')};
-}
-function parseEx(E,text){
-  const ex=[];let cur=-1;const br=/^\s*\[\s*\d{1,2}\s*\]/m.test(text);
-  const re=br?/^\s*\[\s*(\d{1,2})\s*\]\s*(.*)$/:/^\s*(\d{1,2})\s*(?:번|\.|\))\s*(.*)$/;
-  for(const raw of text.split(/\n/)){const m=raw.match(re);const i=m?E.items.findIndex(it=>String(it.no)===m[1]&&!it.el):-1;
-    if(i>=0){cur=i;ex[i]=(m[2]||'').trim();continue}
-    if(cur>=0)ex[cur]=(ex[cur]?ex[cur]+'\n':'')+raw.trim()}
-  let n=0;ex.forEach((v,i)=>{if(v!=null){const t=v.trim().slice(0,2000);if(t){E.ex[i]=t;n++}}});return n;
-}
+/* parseNat·parseEx는 js/logic.js에 있다(테스트에서도 같은 코드를 쓴다). */
 function parseTags(E,text){let n=0;for(const raw of text.split(/\n/)){const m=raw.trim().match(/^(\d{1,2})[번.]?\s+(.+)$/);if(!m)continue;const i=E.items.findIndex(it=>String(it.no)===m[1]&&!it.el);if(i<0)continue;const rest=m[2].replace(/(^|[\s,;\/])([1-5])\s*[:：)]\s*/g,(x,p,d)=>p+CIR[+d]);const o={};for(const part of rest.split(/(?=[①②③④⑤])/)){const k=CIR.indexOf(part[0]);if(k<1)continue;const tg=part.slice(1).replace(/^[\s:：]+/,'').replace(/[\s,;\/]+$/,'').trim();if(tg&&String(k)!==E.key[i])o[k]=tg}if(Object.keys(o).length){E.tags[i]=o;n++}}return n}
 function parseImport(text,tid){
   const ok=[],bad=[];
@@ -454,6 +432,7 @@ document.addEventListener('submit',async e=>{
 async function afterLogin(session){
   S.session=session;S.demo=null;S.ready=false;render();
   const r=await sb.rpc('is_teacher');S.teacher=!!r.data;
+  if(r.error)toast('서버에 연결하지 못했습니다. 새로고침해 주세요: '+r.error.message);
   if(S.teacher){try{await load()}catch(e){toast('불러오지 못했습니다: '+(e?.message||e))}}
   S.ready=true;render();
 }
