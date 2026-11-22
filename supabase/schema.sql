@@ -659,3 +659,75 @@ grant execute on function public.student_retry_submit(uuid, uuid, text) to anon,
 grant execute on function public.student_overall_feedback(uuid) to anon, authenticated;
 grant execute on function public.teacher_save_feedback(uuid, uuid, text) to authenticated;
 -- _ox, _test_class_key_guard는 아무에게도 주지 않는다(안에서만 쓰임).
+
+-- ═══ 추가 기능: 실시간 현황 · 내보내기 · 익명화 ═══
+-- 실시간 현황과 내보내기는 교사가 이미 읽을 수 있는 표(RLS teacher_all)만 쓰므로 새 함수가 필요 없다.
+-- 내보내기(전체 백업)는 students 표에서 code_hash·fail_count·locked_until을 고르지 않고, student_sessions는 교사도 읽을 수 없다.
+--
+-- 익명화: 수업이 끝나 숨긴 반의 개인정보를 지운다. 답안(submissions)은 남겨 누적 통계는 그대로 볼 수 있다.
+--  * 이름 → '학생01', '학생02'… (반 안에서 원래 학번 순서. 100명 이상이면 세 자리)
+--  * 학번 → 9로 시작하는 새 5자리 번호(90001부터, 이미 쓰인 9xxxx 다음). 학번도 바꾸는 까닭:
+--    학번은 명부와 맞춰 보면 바로 누구인지 알 수 있고, 내년 새 학생이 같은 학번을 받으면(학번은 해마다 다시 쓰인다)
+--    명단 붙여넣기가 옛 기록을 새 학생에게 붙여 버린다. 고등학교 학번은 9로 시작하지 않으므로 섞이지 않는다.
+--  * 비밀번호(code_hash)를 지우고 로그인 세션을 모두 지운다 → 아무도 그 학생으로 로그인할 수 없다.
+--  * 한 함수 안에서 모두 하거나(성공) 아무것도 하지 않는다(실패). 반 이름을 정확히 적어야 실행된다.
+--  * 이미 익명화된 학생(학번 9xxxx · 이름 학생NN)은 건너뛴다. 여러 번 불러도 안전하다.
+--  js/tools-logic.js의 anonPlan이 같은 규칙으로 미리 보기를 만든다.
+alter table public.classes add column if not exists anonymized_at timestamptz;
+
+create or replace function public.teacher_anonymize_class(p_class uuid, p_confirm text)
+returns json language plpgsql volatile security definer
+set search_path = public
+as $$
+declare c public.classes; total int; done int; base int; n int; w int;
+begin
+  if not public.is_teacher() then raise exception 'not_teacher' using errcode = '42501'; end if;
+  select * into c from public.classes where id = p_class for update;
+  if not found then return json_build_object('ok', false, 'error', 'not_found'); end if;
+  if not c.hidden then return json_build_object('ok', false, 'error', 'not_hidden'); end if;
+  if coalesce(trim(p_confirm), '') <> c.name then return json_build_object('ok', false, 'error', 'confirm_mismatch'); end if;
+  -- 같은 때에 두 번 눌려도 번호가 겹치지 않게 학생 표를 잠근다(교사 한 명이 쓰는 작은 표라 잠깐이면 된다).
+  lock table public.students in share row exclusive mode;
+  select count(*) into total from public.students where class_id = p_class;
+  select count(*) into done from public.students where class_id = p_class and sid ~ '^9[0-9]{4}$' and name ~ '^학생[0-9]+$';
+  select greatest(90000, coalesce(max(sid::int), 0)) into base from public.students where sid ~ '^9[0-9]{4}$';
+  select count(*) into n from public.students where class_id = p_class and not (sid ~ '^9[0-9]{4}$' and name ~ '^학생[0-9]+$');
+  if base + n > 99999 then return json_build_object('ok', false, 'error', 'sid_full'); end if;
+  w := greatest(2, length(total::text));
+  with todo as (
+    select id, row_number() over (order by sid) as k from public.students
+     where class_id = p_class and not (sid ~ '^9[0-9]{4}$' and name ~ '^학생[0-9]+$'))
+  update public.students s
+     set sid = (base + t.k)::text,
+         name = '학생' || lpad((done + t.k)::text, w, '0'),
+         code_hash = null, must_change_pw = true, fail_count = 0, locked_until = null
+    from todo t where s.id = t.id;
+  -- 이 반 학생의 로그인은 모두 끊는다(이미 익명화된 학생 것도).
+  delete from public.student_sessions ss using public.students st where st.id = ss.student_id and st.class_id = p_class;
+  -- 선생님 한마디에는 학생 이름이 들어갈 수 있으므로 함께 지운다(정리 전에 내보내기로 받아 둔다).
+  delete from public.feedback f using public.students st where f.student_id = st.id and st.class_id = p_class;
+  update public.classes set anonymized_at = now() where id = p_class;
+  return json_build_object('ok', true, 'changed', n, 'students', total,
+    'first_sid', case when n > 0 then (base + 1)::text end, 'last_sid', case when n > 0 then (base + n)::text end);
+end $$;
+
+-- 비밀번호가 지워진(익명화된) 학생은 초기화로 다시 살리지 않는다(학번 9xxxx 학생으로 로그인되는 일을 막음).
+-- teacher_reset_password는 위에 그대로 두고, 익명화된 학생의 비밀번호를 다시 만들지 못하게 막는 장치만 더한다.
+create or replace function public._students_no_anon_pw()
+returns trigger language plpgsql
+set search_path = public
+as $$
+begin
+  if old.code_hash is null and new.code_hash is not null
+     and new.sid ~ '^9[0-9]{4}$' and new.name ~ '^학생[0-9]+$' then
+    raise exception 'anonymized_student' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+drop trigger if exists students_no_anon_pw on public.students;
+create trigger students_no_anon_pw before update of code_hash on public.students
+  for each row execute function public._students_no_anon_pw();
+
+revoke execute on function public.teacher_anonymize_class(uuid, text) from public, anon, authenticated;
+revoke execute on function public._students_no_anon_pw() from public, anon, authenticated;
+grant execute on function public.teacher_anonymize_class(uuid, text) to authenticated;

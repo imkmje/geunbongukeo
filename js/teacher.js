@@ -93,7 +93,7 @@ function schedule(){if(busy()){dirty=true;return}render()}
 document.addEventListener('focusout',()=>setTimeout(()=>{if(dirty&&!busy()){dirty=false;render()}},50));
 
 /* ---------- 상단 탭 ---------- */
-const TABS=[['class','반 분석'],['student','학생 리포트'],['trend','누적 추이'],['manage','시험 관리'],['classes','반 관리']];
+const TABS=[['class','반 분석'],['live','실시간 현황'],['student','학생 리포트'],['trend','누적 추이'],['manage','시험 관리'],['classes','반 관리'],['data','내보내기·정리']];
 function renderTabs(){
   const nav=$('#tabs');
   if(!(S.session&&S.teacher)&&!S.demo){nav.innerHTML='';return}
@@ -109,7 +109,7 @@ function render(){
   if(S.demo)html+=`<div class="demo-band" role="note"><span>예시 데이터를 보는 중입니다. 가상의 학생 26명이며 실제 기록이 아니고, 여기서 바꾼 내용은 저장되지 않습니다.</span><button class="btn small" data-act="demo-off">예시 끄기</button></div>`;
   if(!S.session&&!S.demo){app.innerHTML=viewLogin();return}
   if(!S.teacher&&!S.demo){app.innerHTML=`<div class="card empty"><h2>교사로 등록되지 않은 계정입니다</h2><p>Supabase SQL Editor에서 교사 등록 줄(insert into public.teachers …)을 이 계정의 이메일로 실행했는지 확인해 주세요.</p><button class="btn" data-act="logout">로그아웃</button></div>`;return}
-  {if(S.cf&&!classes().includes(S.cf))S.cf='';html+=(!['manage','classes'].includes(S.tab)&&allClasses().length?clsBar():'')+({class:viewClass,student:viewStudentReport,trend:viewTrend,manage:viewManage,classes:viewClasses}[S.tab]||viewClass)()}
+  {if(S.cf&&!classes().includes(S.cf))S.cf='';html+=(!['manage','classes','data'].includes(S.tab)&&allClasses().length?clsBar():'')+({class:viewClass,live:viewLive,student:viewStudentReport,trend:viewTrend,manage:viewManage,classes:viewClasses,data:viewData}[S.tab]||viewClass)()}
   app.innerHTML=html;
   afterRender();
 }
@@ -237,8 +237,9 @@ function startEdit(id){
 }
 function viewManage(){
   if(S.edit)return viewEditor();
+  if(S.reg)return viewRegister();// js/register.js
   const ts=testList();
-  let h=`<div class="stack"><div class="card"><div class="row" style="justify-content:space-between"><div><h2>시험 회차</h2><p class="sub">회차를 만들고 정답을 넣은 뒤 응시를 열면, 학생 화면에 답안지가 나타납니다.</p></div><div class="row"><button class="btn primary" data-act="new-test">새 시험 만들기</button>${S.demo?'':'<button class="btn" data-act="demo-on">예시 데이터로 둘러보기</button>'}</div></div>`;
+  let h=`<div class="stack"><div class="card"><div class="row" style="justify-content:space-between"><div><h2>시험 회차</h2><p class="sub">회차를 만들고 정답을 넣은 뒤 응시를 열면, 학생 화면에 답안지가 나타납니다.</p></div><div class="row"><button class="btn primary" data-act="new-test">새 시험 만들기</button><button class="btn" data-act="reg-open">파일로 새 시험 만들기</button>${S.demo?'':'<button class="btn" data-act="demo-on">예시 데이터로 둘러보기</button>'}</div></div>`;
   if(!ts.length)h+=`<p class="note" style="margin-top:14px">아직 시험이 없습니다. <b>새 시험 만들기</b>를 누르면 45문항 틀이 미리 채워집니다. 영역 구분은 실제 시험지를 보고 맞춰 주세요.</p>`;
   else h+=`<div class="tbl-wrap" style="margin-top:14px"><table><thead><tr><th>시험</th><th>상태</th><th class="n">답안</th><th>정답</th><th>전국 자료</th><th></th></tr></thead><tbody>${ts.map(t=>{const [c,l]=statusOf(t);const k=keyOf(t.id);const filled=t.items.filter((_,i)=>k[i]&&k[i]!=='0').length;const nat=natOf(t.id);const cf=S.confirm==='del:'+t.id;return `<tr><td><b>${esc(t.title)}</b><br><span class="muted">${esc(t.date||'')}</span></td><td>${classes().length?classes().map(cc=>{const [c2,l2]=statusOf(t,cc);return `<div><span class="pill ${c2}">${esc(cc)} ${l2}</span></div>`}).join(''):`<span class="pill ${c}">${l}</span>`}</td><td class="n">${recordsFor(t.id,'').length}</td><td class="num">${filled}/${t.items.length}</td><td>${nat&&nat.some(Boolean)?'있음':'<span class="muted">없음</span>'}</td><td><div class="row" style="gap:6px">${effClasses().map(c=>!c&&allClasses().length?'':isHiddenCls(c)?`<span class="badge">${esc(c)} 숨김</span>`:isOpen(t,c)?`<button class="btn small" data-act="close" data-v="${t.id}|${esc(c)}">${c?esc(c)+' ':''}응시 닫기</button>`:`<button class="btn small" data-act="open" data-v="${t.id}|${esc(c)}">${c?esc(c)+' ':''}응시 열기</button>`).join('')}<button class="btn small" data-act="edit" data-v="${t.id}">편집</button>${cf?`<span class="confirm">이 시험에 낸 답안 기록도 함께 지워집니다 <button class="btn small red" data-act="del-yes" data-v="${t.id}">삭제</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:`<button class="btn small ghost" data-act="del" data-v="${t.id}">삭제</button>`}</div></td></tr>`}).join('')}</tbody></table></div>`;
   h+='</div>';
