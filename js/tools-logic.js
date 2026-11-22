@@ -163,13 +163,46 @@ function sessionEntry(n,statText,exText){
     pts3:items2.filter(it=>it.pts===3).map(it=>it.no),warn};
 }
 
+/* ---------- 반마다 시험 상태 (교사 화면 전체가 같은 규칙을 쓴다) ----------
+   t {openFor,closedFor,releasedFor}: 반 이름 목록(teacher.js load()가 test_class 줄에서 반마다 만든다).
+   서버(student_submit·student_home)와 같은 규칙: 결과를 공개한 반은 is_open이 남아 있어도 응시 중이 아니다(학생이 더 낼 수 없음). */
+const clsRel=(t,c)=>(t.releasedFor||[]).includes(c);
+const clsOpen=(t,c)=>(t.openFor||[]).includes(c)&&!clsRel(t,c);
+const clsClosed=(t,c)=>(t.closedFor||[]).includes(c);
+/* 상태 칩 [종류, 글]: 고른 반 cs가 모두 공개 → '결과 공개', 일부 공개 → '공개 k/n', 응시 중 → '응시 중(k/n)',
+   그 반에서 열었다 닫음 → '마감', 아무것도 안 함 → '준비 중'. 다른 반에서 닫은 것은 이 반 상태에 섞지 않는다. */
+function testStatus(t,cs){
+  cs=cs&&cs.length?cs:[''];
+  const rel=cs.filter(c=>clsRel(t,c)).length,op=cs.filter(c=>clsOpen(t,c)).length,cl=cs.filter(c=>clsClosed(t,c)&&!clsRel(t,c)&&!clsOpen(t,c)).length;
+  if(rel&&rel===cs.length)return['rel','결과 공개'];if(rel)return['rel',`공개 ${rel}/${cs.length}`];
+  if(op)return['open',cs.length>1?`응시 중 ${op}/${cs.length}`:'응시 중'];
+  if(cl)return['closed',cs.length>1&&cl<cs.length?`마감 ${cl}/${cs.length}`:'마감'];
+  return['draft','준비 중'];
+}
+/* '미제출'을 셀 대상 반: 이 시험이 지금 열렸거나, 열었다 닫았거나, 결과를 공개한 반(주어진 순서). 한 번도 안 연 반은 넣지 않는다. */
+function submitTargets(t,classes){return (classes||[]).filter(c=>c&&(clsOpen(t,c)||clsClosed(t,c)||clsRel(t,c)))}
+/* 제출 현황(반 분석 '제출 현황'·'지금 할 일'·실시간 현황이 모두 이것으로 센다).
+   classes: 고른 반 목록, lists {반:[{id:학번,name}]}, doneSids: 이 시험 답안이 있는 학번(Set 또는 배열).
+   돌려주는 값: rows [{sid,name,cls,done,late,open}] (학번순), n 낸 학생 / m 대상 학생,
+   miss 아직 안 냄(응시 중이거나 닫은 반), late 결과 공개 전에 못 냄(공개한 반이라 더 낼 수 없음),
+   openMiss 응시 중인 반에서 아직 안 낸 학생, classes 대상 반, openClasses 응시 중인 반 */
+function submitStatus(t,classes,lists,doneSids){
+  const done=doneSids instanceof Set?doneSids:new Set(doneSids||[]);
+  const cs=submitTargets(t,classes);const rows=[];
+  for(const c of cs)for(const p of (lists&&lists[c])||[]){const d=done.has(p.id);rows.push({sid:p.id,name:p.name,cls:c,done:d,late:!d&&clsRel(t,c),open:clsOpen(t,c)})}
+  rows.sort((a,b)=>a.sid<b.sid?-1:a.sid>b.sid?1:0);
+  const left=rows.filter(r=>!r.done);
+  return {classes:cs,openClasses:cs.filter(c=>clsOpen(t,c)),rows,n:rows.length-left.length,m:rows.length,
+    miss:left.filter(r=>!r.late),late:left.filter(r=>r.late),openMiss:left.filter(r=>r.open)};
+}
+
 /* ---------- 시험 고르기 (반 분석·학생 리포트 칩, 기본 선택) ---------- */
-/* 고른 반(들)에서 응시가 열렸거나 결과를 공개했거나 답안이 하나라도 있는 시험은 위에(main), 나머지는 '준비 중인 시험'으로 접는다(more).
-   tests [{id,openFor,releasedFor}] (보여 줄 순서), classes: 고른 반 이름 목록, hasRecs(test)→bool */
+/* 고른 반(들)에서 응시가 열렸거나, 열었다 닫았거나, 결과를 공개했거나, 답안이 하나라도 있는 시험은 위에(main), 나머지는 '준비 중인 시험'으로 접는다(more).
+   tests [{id,openFor,closedFor,releasedFor}] (보여 줄 순서), classes: 고른 반 이름 목록, hasRecs(test)→bool */
 function splitTestChips(tests,classes,hasRecs){
   const cs=(classes||[]).filter(c=>c!=null);const main=[],more=[];
   for(const t of tests||[]){
-    const live=cs.some(c=>(t.openFor||[]).includes(c)||(t.releasedFor||[]).includes(c))||(hasRecs?!!hasRecs(t):false);
+    const live=cs.some(c=>clsOpen(t,c)||clsClosed(t,c)||clsRel(t,c))||(hasRecs?!!hasRecs(t):false);
     (live?main:more).push(t);
   }
   return {main,more};
@@ -193,4 +226,4 @@ function groupKey(key,n=5){const s=String(key||'');const out=[];for(let i=0;i<s.
 /* 정답 풀어 쓰기(마우스를 올리거나 누르면): '1번 5, 2번 2, …'. items가 있으면 그 문항 번호를 쓴다. */
 function keyTip(key,items){return Array.from(String(key||''),(d,i)=>`${items&&items[i]?items[i].no:i+1}번 ${d==='0'?'?':d}`).join(', ')}
 
-if(typeof module!=='undefined'&&module.exports)module.exports={splitTestChips,pickDefaultTest,groupKey,keyTip,tlGrade,csvCell,toCsv,CSV_BOM,safeFileName,testCsvRows,classCumRows,classAnswerRows,anonPlan,isAnon,liveBoard,sortBoard,pairSessionFiles,sessionTitle,sessionEntry};
+if(typeof module!=='undefined'&&module.exports)module.exports={clsOpen,clsRel,clsClosed,testStatus,submitTargets,submitStatus,splitTestChips,pickDefaultTest,groupKey,keyTip,tlGrade,csvCell,toCsv,CSV_BOM,safeFileName,testCsvRows,classCumRows,classAnswerRows,anonPlan,isAnon,liveBoard,sortBoard,pairSessionFiles,sessionTitle,sessionEntry};

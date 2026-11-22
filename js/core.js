@@ -49,15 +49,13 @@ function analyze(t,key,recs){
   const graded=recs.map(r=>({...r,...grade(t,key,r)}));
   const items=t.items.map((it,i)=>({i,no:it.no,area:it.area,type:it.type,ans:key[i]||'',n:0,c:0,cnt:[0,0,0,0,0,0]}));
   for(const g of graded)for(const i of g.idx){const ch=+(g.a[i]||0)||0;items[i].n++;items[i].cnt[ch]++;if(g.res[i])items[i].c++}
-  // 상·하위 27% 집단으로 변별도
-  const sorted=[...graded].sort((a,b)=>b.pct-a.pct);const k=Math.max(1,Math.round(sorted.length*.27));
-  const up=sorted.slice(0,k),lo=sorted.slice(-k);
+  // 상·하위 27% 집단으로 변별도(js/logic.js itemDisc: 응시 DISC_MIN_N명 미만이면 null, 같은 점수는 학번순으로 늘 같게)
+  const disc=itemDisc(graded,N);
   for(const it of items){
     it.rate=it.n?it.c/it.n:null;it.dist=it.cnt.map(c=>it.n?c/it.n:0);
     let best=0,opt=0;for(let o=1;o<=5;o++){if(String(o)!==it.ans&&it.dist[o]>best){best=it.dist[o];opt=o}}it.lure={opt,share:best};
-    const ru=rateIn(up,it.i),rl=rateIn(lo,it.i);it.disc=(graded.length>=6&&ru!=null&&rl!=null)?ru-rl:null;
+    it.disc=disc[it.i];
   }
-  function rateIn(g,i){const a=g.filter(x=>x.res[i]!==undefined);return a.length?a.filter(x=>x.res[i]).length/a.length:null}
   const agg=f=>{const m={};for(const it of items){if(!it.n)continue;const kk=f(it)||'(미지정)';m[kk]=m[kk]||{c:0,n:0};m[kk].c+=it.c;m[kk].n+=it.n}const o={};for(const kk in m)o[kk]=m[kk].c/m[kk].n;return o};
   const pcts=graded.map(g=>g.pct).sort((a,b)=>a-b);
   const scores=graded.map(g=>g.score);

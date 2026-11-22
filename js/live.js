@@ -13,15 +13,14 @@ function lvTest(){
   const open=lvOpenTests();const all=testList();const t=open[open.length-1]||all[all.length-1];
   L.tid=t?t.id:null;return t||null;
 }
-/* 이 반(또는 보이는 모든 반) 명단과 제출 기록 */
+/* 명단과 제출 기록. 명단은 이 시험을 열었거나 닫았거나 결과를 공개한 반만(teacher.js subStatus: 반 분석 '제출 현황'과 같은 수).
+   한 번도 안 연 반 학생은 '아직 안 냄'으로 세지 않는다. 결과를 공개한 반에서 못 낸 학생은 late('공개 전에 못 냄'). */
 function lvRoster(t){
-  const rl=rosterLists();const pool=[];
-  for(const c of lvClasses())for(const p of (rl[c]||[]))pool.push({sid:p.id,name:p.name,cls:c});
-  pool.sort((a,b)=>a.sid.localeCompare(b.sid));
-  const recs=recordsFor(t.id,S.cf);const bySid={};for(const r of recs)bySid[ident(r.name)]=r;
-  const rows=pool.map(p=>({...p,rec:bySid[p.sid]||null}));
-  const extra=recs.filter(r=>!pool.some(p=>p.sid===ident(r.name)));
-  return {rows,recs,done:rows.filter(r=>r.rec).length,extra};
+  const SS=subStatus(t);
+  const recs=recordsFor(t.id,S.cf);const bySid={};for(const r of recordsFor(t.id,'',true))bySid[ident(r.name)]=r;
+  const rows=SS.rows.map(p=>({...p,rec:p.done?bySid[p.sid]||null:null}));
+  const ri=rosterIndex();const extra=recs.filter(r=>!ri[ident(r.name)]);
+  return {rows,recs,done:SS.n,extra,miss:SS.miss,late:SS.late,classes:SS.classes};
 }
 
 /* ---------- 화면 ---------- */
@@ -49,13 +48,15 @@ function viewLive(){
     <div class="row" style="margin-top:12px;justify-content:space-between">
       <span class="sub">${S.demo?'예시 데이터라 자동으로 바뀌지 않습니다.':`마지막 확인 ${esc(lvTime(L.at)||'–')} · 이 탭을 보고 있는 동안 10초마다 자동으로 다시 확인합니다.`}${L.err?` <span style="color:var(--bad)">${esc(L.err)}</span>`:''}</span>
       <div class="row" style="gap:6px"><button class="btn" data-act="lv-refresh" ${L.busy?'disabled':''}>${L.busy?'확인하는 중…':'지금 새로고침'}</button><span class="lv-proj-wrap">${stillOpen.length?'<span class="sub lv-proj-why" id="lvProjWhy">응시를 닫은 뒤에 열 수 있습니다</span>':''}<button class="btn primary" data-act="lv-proj" ${stillOpen.length?'disabled aria-describedby="lvProjWhy"':''}>해설 화면 열기</button></span></div></div></div>`;
-  if(!M)h+=`<div class="card empty"><h3>${S.cf?esc(S.cf)+'에 ':''}학생 명단이 없습니다</h3><p>반 관리에서 명단을 넣으면 누가 냈는지 여기에 보입니다.</p></div>`;
+  if(!M)h+=R.classes.length?`<div class="card empty"><h3>${S.cf?esc(S.cf)+'에 ':''}학생 명단이 없습니다</h3><p>반 관리에서 명단을 넣으면 누가 냈는지 여기에 보입니다.</p></div>`
+    :`<div class="card empty"><h3>${S.cf?esc(S.cf)+'에서 ':''}이 시험의 응시를 연 적이 없습니다</h3><p>위에서 <b>응시 열기</b>를 누르면, 그 반 명단으로 누가 냈는지 여기에 보입니다.</p></div>`;
   else{
-    const miss=R.rows.filter(r=>!r.rec);
-    h+=`<div class="card"><h3>아직 안 낸 학생 ${miss.length}명</h3>${miss.length?`<div class="lv-miss">${miss.map(r=>`<span class="badge warn">${esc(r.sid+' '+r.name)}${S.cf?'':' · '+esc(r.cls)}</span>`).join('')}</div>`:'<p class="sub" style="color:var(--good)"><b>명단 전원이 냈습니다.</b></p>'}
+    const miss=R.miss,late=R.late;
+    h+=`<div class="card"><h3>아직 안 낸 학생 ${miss.length}명</h3>${miss.length?`<div class="lv-miss">${miss.map(r=>`<span class="badge warn">${esc(r.sid+' '+r.name)}${S.cf?'':' · '+esc(r.cls)}</span>`).join('')}</div>`:late.length?'':'<p class="sub" style="color:var(--good)"><b>명단 전원이 냈습니다.</b></p>'}
+      ${late.length?`<p class="sub" style="margin-top:8px">공개 전에 못 냄 ${late.length}명 (결과를 공개한 반이라 더 낼 수 없습니다. 종이 답안으로만 넣을 수 있습니다)</p><div class="lv-miss">${late.map(r=>`<span class="badge">${esc(r.sid+' '+r.name)}${S.cf?'':' · '+esc(r.cls)}</span>`).join('')}</div>`:''}
       ${R.extra.length?`<p class="sub" style="margin-top:8px;color:var(--warn)">명단에 없는 답안 ${R.extra.length}개가 있습니다(다른 반에서 옮긴 학생일 수 있습니다).</p>`:''}</div>
     <div class="card"><h3>명단</h3><div class="tbl-wrap"><table class="lv-table"><thead><tr><th>학번</th><th>이름</th>${S.cf?'':'<th>반</th>'}<th>상태</th><th>제출 시각</th></tr></thead><tbody>
-      ${R.rows.map(r=>`<tr><td class="mono">${esc(r.sid)}</td><td>${esc(r.name)}</td>${S.cf?'':`<td>${esc(r.cls)}</td>`}<td>${r.rec?'<span class="badge good">제출함</span>':'<span class="badge warn">아직 안 냄</span>'}</td><td class="num muted">${r.rec?esc(lvWhen(r.rec.at))+(r.rec.src==='student'?'':' (교사 입력)'):''}</td></tr>`).join('')}
+      ${R.rows.map(r=>`<tr><td class="mono">${esc(r.sid)}</td><td>${esc(r.name)}</td>${S.cf?'':`<td>${esc(r.cls)}</td>`}<td>${r.done?'<span class="badge good">제출함</span>':r.late?'<span class="badge">공개 전에 못 냄</span>':'<span class="badge warn">아직 안 냄</span>'}</td><td class="num muted">${r.rec?esc(lvWhen(r.rec.at))+(r.rec.src==='student'?'':' (교사 입력)'):''}</td></tr>`).join('')}
     </tbody></table></div></div>`;
   }
   return h+'</div>';
