@@ -45,10 +45,10 @@
 .rt-h{font-size:13.5px;margin:0 0 6px}
 .rt-h.good{color:var(--good)} .rt-h.bad{color:var(--bad)}
 .ox-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(44px,1fr));gap:6px}
-.ox{display:flex;flex-direction:column;align-items:center;border:1px solid var(--line);border-radius:6px;padding:3px 0;font-size:12px;line-height:1.3}
-.ox b{font-size:15px;font-family:var(--f-mono)}
+.ox{display:flex;flex-direction:column;align-items:center;border:1px solid var(--line);border-radius:6px;padding:3px 0;font-size:12px;line-height:1.3;color:var(--ink2)}
+.ox b{font-size:17px;line-height:22px;height:22px;font-family:var(--f-body);font-weight:700}
 .ox-O b{color:var(--good)} .ox-X{background:color-mix(in oklab,var(--bad) 9%,var(--paper));border-color:color-mix(in oklab,var(--bad) 40%,transparent)} .ox-X b{color:var(--bad)}
-.ox-B{background:repeating-linear-gradient(45deg,var(--bg) 0 4px,var(--paper) 4px 8px)} .ox-B b{color:var(--muted)}
-.ox-i{border:1px solid var(--line2)}
-.ox-i.ox-O{background:var(--paper)} .ox-i.ox-X{background:color-mix(in oklab,var(--bad) 30%,var(--paper))}
+.ox-B{background:repeating-linear-gradient(45deg,var(--bg) 0 4px,var(--paper) 4px 8px)} .ox-B b{color:var(--ink2);font-size:12.5px;font-weight:600}
+.ox-i{border:1px solid var(--line2);display:inline-grid!important;place-items:center;font-style:normal;font-size:10px;font-weight:700;line-height:1}
+.ox-i.ox-O{background:var(--paper);color:var(--good)} .ox-i.ox-X{background:color-mix(in oklab,var(--bad) 12%,var(--paper));color:var(--bad)}
 .omr-cols.rt-cols{grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr))}

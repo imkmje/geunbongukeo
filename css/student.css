@@ -1,0 +1,39 @@
+/* 학생 화면 전용 (index.html만 불러옴) */
+/* 점수 칸: 100점 환산 아래에 원점수 작게 */
+.tile .raw,.hist-tbl .raw{font-size:12px;color:var(--ink2);font-weight:400;font-variant-numeric:tabular-nums}
+.hist-tbl th small{font-weight:500}
+/* 빈 문항: 번호를 누르면 그 줄로 간다. 빈 줄 번호는 빨간 바탕(답안지 번호가 원래 붉은색이라 바탕으로 구분) */
+.blank-info{line-height:2}
+.blank-no{border:1px solid var(--bad);background:color-mix(in oklab,var(--bad) 8%,var(--paper));color:var(--bad);font-weight:700;border-radius:6px;padding:1px 7px;cursor:pointer;font-size:13px;line-height:1.5;font-family:var(--f-mono)}
+.blank-no:hover{background:var(--bad);color:#fff}
+.confirm .blank-no{font-size:12.5px}
+.omr-row.is-blank .no{background:var(--bad);color:#fff;border-radius:5px;padding:2px 4px;text-align:center}
+.omr-row{scroll-margin:90px 0}
+/* 다시 풀기를 안 한 학생 안내(회색 한 줄) */
+.rt-none{margin:0;padding:10px 14px;border-radius:8px;background:var(--bg);border:1px solid var(--line);color:var(--ink2);font-size:14px}
+.rt-split3{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:12px 16px}
+.rt-h.mute{color:var(--ink2)}
+/* 정답·해설 목록의 꼬리표 */
+.tag-easy{color:var(--warn);background:color-mix(in oklab,var(--warn) 8%,var(--paper))}
+.tag-rare{color:var(--ink2);border-style:dashed;cursor:help}
+/* 접어 둔 분석 */
+details.more>summary{cursor:pointer;font-weight:700;font-size:15px;list-style:none;display:flex;align-items:center;gap:8px}
+details.more>summary::-webkit-details-marker{display:none}
+details.more>summary::before{content:"▸";color:var(--omr-ink);transition:transform .15s}
+details.more[open]>summary::before{transform:rotate(90deg)}
+details.more .card{border:0;padding:0}
+/* 지문 세트: 한 줄에 한 세트(휴대폰에서도 표가 접히지 않게) */
+.set-list{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:8px}
+.set-list li{padding:9px 12px;border-bottom:1px solid var(--line);border-left:3px solid var(--line2)}
+.set-list li:last-child{border-bottom:0}
+.set-list li.set-collapse{border-left-color:var(--bad)} .set-list li.set-slip,.set-list li.set-part{border-left-color:var(--warn)} .set-list li.set-ok{border-left-color:var(--good)}
+.set-nm{font-weight:600;font-size:14px;overflow-wrap:anywhere}
+.set-meta{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;font-size:13px;color:var(--ink2);margin-top:2px}
+/* 누적 기록 표: 시험 이름이 한 글자씩 접히지 않게 */
+.hist-tbl td:first-child{min-width:7.5em}
+.hist-tbl td.n{white-space:nowrap}
+.hist-tbl .raw{margin-top:1px}
+/* 빈 문항 번호를 눌러 간 줄을 잠깐 표시 */
+.omr-row.flash{background:color-mix(in oklab,var(--bad) 12%,var(--paper));border-radius:6px}
+.hist-link{background:none;border:0;padding:0;text-align:left;cursor:pointer;color:var(--s1);text-decoration:underline;text-underline-offset:3px}
+@media (max-width:560px){.hist-tbl .hist-more{display:none}}

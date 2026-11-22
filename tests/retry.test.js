@@ -37,7 +37,7 @@ test('retryOutcome · retryMessage: 실수형/개념형 나누기',()=>{
   assert.equal(Math.round(o.rate*100),67);
   assert.match(R.retryMessage(o),/맞힌 2문항은 '실수형', 또 틀린 1문항은 '개념형'/);
   assert.match(R.retryMessage(R.retryOutcome('123','-23')),/모두 맞혔습니다.*실수형/);
-  assert.match(R.retryMessage(R.retryOutcome('123','-00')),/또 틀렸습니다.*개념형/);
+  assert.match(R.retryMessage(R.retryOutcome('123','-31')),/또 틀렸습니다.*개념형/);
   assert.equal(R.retryMessage(R.retryOutcome('123','---')),'');
   assert.equal(R.retryOutcome(['1','2'],'-2').fixed.length,1,'정답이 배열이어도 된다');
 });
@@ -96,4 +96,32 @@ test('explainPriority: 또 틀린 수가 같으면 처음 오답률이 높은 �
   // 또 틀린 수가 오답률보다 먼저
   const out3=explainPriority([{no:'1'},{no:'2'}],'12',['21','11','12'],['3-']);
   assert.deepEqual(out3.map(x=>x.no),['1','2']);
+});
+
+test('retryOutcome: 다시 풀 때 비워 둔 문항은 개념형(또 틀림)이 아니라 blank',()=>{
+  const o=R.retryOutcome('31524','-0521');
+  assert.deepEqual(o.targets,[1,2,3,4],'targets는 예전처럼 다시 풀 기회가 있던 자리 전체');
+  assert.deepEqual(o.fixed,[2,3]);
+  assert.deepEqual(o.again,[4],'비운 1번 자리는 again에 없다');
+  assert.deepEqual(o.blank,[1]);
+  assert.equal(o.rate,2/4,'rate는 예전과 같이 fixed/targets');
+  assert.equal(o.triedRate,2/3,'triedRate는 실제로 고른 문항 중 맞힌 비율');
+  const all=R.retryOutcome('123','-00');
+  assert.deepEqual(all.again,[]);assert.deepEqual(all.blank,[1,2]);assert.equal(all.triedRate,null);
+  assert.match(R.retryMessage(all),/모두 비워 두었습니다/);
+  assert.doesNotMatch(R.retryMessage(all),/개념형/);
+  const m=R.retryMessage(R.retryOutcome('123','-20'));
+  assert.match(m,/다시 풀어서 1문항을 맞혔습니다/);assert.doesNotMatch(m,/모두 맞혔/);assert.match(m,/비워 둔 1문항/);
+  assert.deepEqual(R.retryOutcome('12','--').blank,[]);
+});
+
+test('explainPriority: 다시 풀 때 비운 답은 또 틀림이 아니라 안 다시 품(retryBlank로 따로 셈)',()=>{
+  const items=[{no:'1'},{no:'2'}];
+  // 1번: 3명 모두 틀림. 다시 풀기: 1명 맞힘, 1명 또 틀림, 1명 비움
+  const out=explainPriority(items,'12',['22','32','42'],['1-','3-','0-']);
+  const q=out[0];
+  assert.equal(q.no,'1');
+  assert.equal(q.wrong,3);assert.equal(q.retried,2);assert.equal(q.fixed,1);assert.equal(q.again,1);
+  assert.equal(q.retryBlank,1);assert.equal(q.notRetried,1,'비운 학생은 안 다시 품에 들어간다');
+  assert.equal(q.fixed+q.again+q.notRetried,q.wrong);
 });

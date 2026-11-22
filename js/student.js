@@ -56,9 +56,20 @@ function viewTake(){
   // 저장해 둔 임시 답안의 길이가 지금 문항 수와 다르면(선생님이 문항 수를 고친 경우) 맞춰 준다. 다르면 제출이 거절된다.
   if(T.draft[dk]&&T.draft[dk].a.length!==n)T.draft[dk].a=T.draft[dk].a.padEnd(n,'0').slice(0,n);
   const dr=T.draft[dk]||(T.draft[dk]={a:(t.answers||'').padEnd(n,'0').slice(0,n),el:''});
-  const blanks=dr.a.split('').filter(c=>c==='0').length;
-  return head()+omrCard(t,dr,null,false)+`<div class="card"><div class="row" style="justify-content:space-between"><div><b>${t.submitted_at?'이미 냈습니다. 고쳐서 다시 낼 수 있습니다.':'다 마킹했으면 제출하세요.'}</b><p class="sub" id="blankInfo">빈 문항 ${blanks}개</p></div>
-  <div class="row">${T.confirm?`<span class="confirm">빈 문항 ${blanks}개가 있습니다. 그대로 낼까요? <button class="btn small red" data-act="submit-yes">제출</button><button class="btn small ghost" data-act="submit-no">계속 마킹</button></span>`:`<button class="btn red" data-act="submit" ${T.busy?'disabled':''}>답안 제출</button>`}<button class="btn ghost" data-act="home">목록으로</button></div></div></div>`;
+  const list=takeBlanks(t,dr);
+  return head()+omrCard(t,dr,null,false)+`<div class="card"><div class="row" style="justify-content:space-between"><div><b>${t.submitted_at?'이미 냈습니다. 고쳐서 다시 낼 수 있습니다.':'다 마킹했으면 제출하세요.'}</b><p class="sub blank-info" id="blankInfo">${takeInfoHtml(list)}</p></div>
+  <div class="row">${T.confirm?`<span class="confirm"><span id="blankConfirm">${blankSentence(list,10,blankBtn('omr-r'))}</span> <button class="btn small red" data-act="submit-yes">제출</button><button class="btn small ghost" data-act="submit-no">계속 마킹</button></span>`:`<button class="btn red" data-act="submit" ${T.busy?'disabled':''}>답안 제출</button>`}<button class="btn ghost" data-act="home">목록으로</button></div></div></div>`;
+}
+/* 답안지의 빈 문항: 번호 목록(누르면 그 줄로), 빈 줄 번호는 빨간 바탕 */
+const takeBlanks=(t,dr)=>blankList(t.items,dr.a,applicable(t,dr.el));
+const takeInfoHtml=list=>list.length?`빈 문항: ${blankNos(list,10,blankBtn('omr-r'))}`:'빈 문항 없음';
+function paintTake(){
+  const t=(T.me?.tests||[]).find(x=>x.id===T.cur);const dr=t&&T.draft[dkey(t.id)];if(!dr)return;
+  const list=takeBlanks(t,dr);const bl=new Set(list.map(x=>x.i));
+  document.querySelectorAll('.omr-row').forEach(r=>{const b=r.querySelector('.bub[data-i]');if(!b)return;const i=+b.dataset.i;r.id='omr-r'+i;r.classList.toggle('is-blank',bl.has(i))});
+  const el=$('#blankInfo');if(el)el.innerHTML=takeInfoHtml(list);
+  const cf=$('#blankConfirm');if(cf)cf.innerHTML=blankSentence(list,10,blankBtn('omr-r'));
+  return list;
 }
 function clsOf(row){const st=row.stats||{};return {n:st.n||0,avgPct:st.avgPct??null,ir:st.ir||[],dist:st.dist||[],area:st.area||{},type:st.type||{},nat:row.nat||null}}
 function allPicks(){const out=[];for(const row of T.results||[]){if(!row.answers||!row.tags||!row.key)continue;out.push(...tagPicks({items:row.items},row.key.split(''),row.tags,{a:row.answers,el:''},row.id))}return out}
@@ -69,15 +80,19 @@ function viewResult(){
   if(row.keyHidden)return head()+viewResultPre(row);// js/student-retry.js: 정답·해설 공개 전
   const t={title:row.title,items:row.items};const key=(row.key||'').split('');const cls=clsOf(row);
   const r=report(t,key,{a:row.answers,el:''},cls);
-  const card=(x,extra)=>`<div class="focus-item"><div class="qno">${esc(x.no)}</div><div style="min-width:0">${esc(x.area)}${x.type?' · '+esc(x.type):''}<div class="why"><span class="pill" style="color:var(--bad)">내 답 ${x.mine==='0'?'무응답':CIR[+x.mine]}</span><span class="pill" style="color:var(--s1)">정답 ${CIR[+x.ans]}</span></div>${extra||''}</div><div class="num" style="text-align:right">${x.rate!=null?'반 '+pct(x.rate):''}${x.nr!=null?`<br><span class="muted">전국 ${pct(x.nr)}</span>`:''}</div></div>`;
-  return head()+`<div class="card"><h2>${esc(row.title)} 결과</h2><div class="tiles" style="margin-top:10px"><div class="tile"><div class="k">내 점수</div><div class="v">${r.score}<small> / ${r.max}</small></div></div><div class="tile"><div class="k">반 평균 (100점 환산)</div><div class="v">${cls.avgPct!=null?Math.round(cls.avgPct*100):'–'}<small> 점</small></div></div><div class="tile"><div class="k">틀린 문항</div><div class="v">${r.wrong.length}<small> 개</small></div></div></div></div>
+  // 많은 학생이 맞혔는데 내가 놓친 문항 · 드물게 고른 오답: 따로 카드 대신 문항에 작은 꼬리표로
+  const easy=new Set(r.missedEasy.map(x=>x.i)),rare=new Set(r.rare.map(x=>x.i));
+  const easyTag=x=>!easy.has(x.i)?'':x.rate!=null&&x.rate>=.7?`<span class="pill tag-easy">반 ${pct(x.rate)}가 맞힌 문항</span>`:`<span class="pill tag-easy">전국 ${pct(x.nr)}가 맞힌 문항</span>`;
+  const rareTag=x=>rare.has(x.i)?'<span class="pill tag-rare" tabindex="0" data-tip="다른 응시자가 거의 고르지 않은 답입니다. 발문(맞는 것/않은 것)을 거꾸로 읽지 않았는지, 마킹을 잘못하지 않았는지 확인해 보세요.">드물게 고른 답</span>':'';
+  const card=x=>`<div class="focus-item"><div class="qno">${esc(x.no)}</div><div style="min-width:0">${esc(x.area)}${x.type?' · '+esc(x.type):''}<div class="why"><span class="pill" style="color:var(--bad)">내 답 ${x.mine==='0'?'비움':CIR[+x.mine]}</span><span class="pill" style="color:var(--s1)">정답 ${CIR[+x.ans]}</span>${easyTag(x)}${rareTag(x)}${retryPill(row,x.i)}</div>${exBlock(row.ex?.[x.i])}</div><div class="num" style="text-align:right">${x.rate!=null?'반 '+pct(x.rate):''}${x.nr!=null?`<br><span class="muted">전국 ${pct(x.nr)}</span>`:''}</div></div>`;
+  const tags=tagCard(allPicks(),null,'s');
+  return head()+`<div class="card"><h2>${esc(row.title)} 결과</h2>${scoreTiles(r,cls,`<div class="tile"><div class="k">틀린 문항</div><div class="v">${r.wrong.length}<small>개</small></div></div>`)}</div>
   ${resultExtras(row)}
-  <div class="grid2"><div class="card"><h3>많은 학생이 맞혔는데 내가 놓친 문항</h3>${r.missedEasy.length?`<div class="focus-list">${r.missedEasy.map(x=>card(x)).join('')}</div><p class="sub" style="margin-top:8px">이 문항들은 다시 풀면서 정답의 근거가 되는 문장을 지문에서 찾아 표시해 보세요.</p>`:'<p class="muted">없습니다. 쉬운 문항을 잘 챙겼습니다.</p>'}</div>
-  <div class="card"><h3>영역별 · 반과 비교</h3>${barRows(r.areaCmp.map(x=>({label:x.name,v:x.me,w:x.cls})),{a:'나',b:'반 평균'})}</div></div>
-  ${setCard(r)}${tagCard(allPicks(),null,'s')}
-  ${r.rare.length?`<div class="card"><h3>드물게 고른 오답</h3><p class="sub" style="margin-bottom:8px">다른 응시자가 거의 고르지 않은 선지를 골라 틀린 문항입니다. 발문(맞는 것/않은 것)을 거꾸로 읽지 않았는지, 지문을 잘못 이해하지 않았는지, 마킹을 잘못하지 않았는지 확인해 보세요.</p><div class="focus-list">${r.rare.map(x=>card(x)).join('')}</div></div>`:''}
-  ${r.wrong.length?`<div class="card"><h3>틀린 문항 다시 보기</h3><div class="focus-list">${r.wrong.map(x=>card(x,retryPill(row,x.i)+exBlock(row.ex?.[x.i]))).join('')}</div></div>`:''}
-  ${omrCard(t,{a:row.answers,el:''},key,true)}`;
+  ${r.wrong.length?`<div class="card"><h3>틀린 문항 정답·해설</h3>${r.missedEasy.length?`<p class="sub" style="margin-bottom:4px">'N%가 맞힌 문항' 표시는 많은 학생이 맞혔는데 내가 놓친 문항입니다. 정답의 근거 문장을 지문에서 찾아 표시해 보세요.</p>`:''}<div class="focus-list">${r.wrong.map(card).join('')}</div></div>`:`<div class="card"><h3>모든 문항을 맞혔습니다</h3><p class="sub">풀이 시간을 줄이는 연습으로 넘어가 봅시다.</p></div>`}
+  ${omrCard(t,{a:row.answers,el:''},key,true)}
+  <details class="card more"><summary>영역·지문 세트 분석 보기</summary><div class="stack" style="margin-top:14px">
+   <div><h3>영역별 · 반과 비교</h3>${barRows(r.areaCmp.map(x=>({label:x.name,v:x.me,w:x.cls})),{a:'나',b:'반 평균'})}</div>
+   ${setList(r)}${tags}</div></details>`;
 }
 function viewHistory(){
   const rows=(T.results||[]).filter(x=>x.answers&&x.key);
@@ -87,7 +102,7 @@ function viewHistory(){
   return head()+overallFbCard()+`<div class="grid2"><div class="card"><h3>회차별 점수 (100점 환산)</h3>${lineChart(data.map(x=>x.label),[{name:'나',color:'var(--s2)',values:data.map(x=>x.me)},{name:'반 평균',color:'var(--s1)',values:data.map(x=>x.cls)}])}</div>
   ${data.some(x=>x.hm!=null)?`<div class="card"><h3>어려운 문항 정답률 (전국 오답률 상위 15문항)</h3>${lineChart(data.map(x=>x.label),[{name:'나',color:'var(--s2)',values:data.map(x=>x.hm)},{name:'전국',color:'var(--muted)',values:data.map(x=>x.hn)}])}<p class="sub">시험마다 난도가 달라서, 전국에서 많이 틀린 문항만 따로 모아 전국 정답률과 비교합니다.</p></div>`:''}</div>
   ${tagCard(allPicks(),null,'s')}
-  <div class="card"><h3>시험별 결과</h3><div class="tbl-wrap"><table><thead><tr><th>시험</th><th class="n">점수</th><th class="n">반 평균</th><th></th></tr></thead><tbody>${data.map(x=>`<tr><td>${esc(x.label)}</td><td class="n">${x.score}/${x.max}</td><td class="n">${x.cls!=null?Math.round(x.cls*100)+'점':'–'}</td><td><button class="btn small" data-act="result" data-v="${x.id}">자세히</button></td></tr>`).join('')}</tbody></table></div></div>`;
+  <div class="card"><h3>시험별 결과</h3><div class="tbl-wrap"><table class="hist-tbl"><thead><tr><th>시험</th><th class="n">내 점수<br><small>(100점 환산)</small></th><th class="n">반 평균<br><small>(100점 환산)</small></th><th class="hist-more"></th></tr></thead><tbody>${data.map(x=>{const av=pct100(x.cls);return `<tr><td><button type="button" class="hist-link" data-act="result" data-v="${x.id}">${esc(x.label)}</button></td><td class="n" title="${x.max}점 만점에 ${x.score}점"><b>${score100(x.score,x.max)??'–'}점</b><div class="raw">${x.score}/${x.max}</div></td><td class="n"${av!=null?` title="${x.max}점 만점에 ${oneDec(x.cls*x.max)}점"`:''}>${av!=null?`${av}점<div class="raw">${oneDec(x.cls*x.max)}/${x.max}</div>`:'–'}</td><td class="hist-more"><button class="btn small" data-act="result" data-v="${x.id}">자세히</button></td></tr>`}).join('')}</tbody></table></div></div>`;
 }
 function render(){
   const app=$('#app');
@@ -95,6 +110,7 @@ function render(){
   if(!T.token||!T.me){app.innerHTML=viewLogin();return}
   if(T.view==='pw'){app.innerHTML=`<div class="stack">${viewPw(false)}</div>`;return}
   app.innerHTML=`<div class="stack">${({home:viewHome,take:viewTake,result:viewResult,history:viewHistory,retry:viewRetry}[T.view]||viewHome)()}</div>`;
+  if(T.view==='take')paintTake();
 }
 
 /* ---------- 동작 ---------- */
@@ -129,8 +145,9 @@ document.addEventListener('click',async e=>{
     case 'home':T.view='home';T.confirm=false;await refreshHome();render();break;
     case 'take':T.cur=v;T.view='take';T.confirm=false;render();break;
     case 'pw':T.view='pw';T.pwMsg='';render();break;
-    case 'mark':{const dr=T.draft[dkey(T.cur)];const i=+b.dataset.i;const arr=dr.a.split('');arr[i]=arr[i]===v?'0':v;dr.a=arr.join('');b.parentElement.querySelectorAll('.bub').forEach(x=>x.setAttribute('aria-pressed',arr[i]===x.dataset.v));lsSet('gb-draft',T.draft);const bl=$('#blankInfo');if(bl)bl.textContent='빈 문항 '+arr.filter(c=>c==='0').length+'개';break}
-    case 'submit':{const dr=T.draft[dkey(T.cur)];if(dr.a.includes('0')){T.confirm=true;render();break}await submit();break}
+    case 'mark':{const dr=T.draft[dkey(T.cur)];const i=+b.dataset.i;const arr=dr.a.split('');arr[i]=arr[i]===v?'0':v;dr.a=arr.join('');b.parentElement.querySelectorAll('.bub').forEach(x=>x.setAttribute('aria-pressed',arr[i]===x.dataset.v));lsSet('gb-draft',T.draft);paintTake();break}
+    case 'submit':{const t=(T.me.tests||[]).find(x=>x.id===T.cur);const dr=T.draft[dkey(T.cur)];if(t&&takeBlanks(t,dr).length){T.confirm=true;render();break}await submit();break}
+    case 'goto':{const row=document.getElementById(b.dataset.t);if(!row)break;row.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'center'});row.querySelector('.bub')?.focus({preventScroll:true});row.classList.add('flash');setTimeout(()=>row.classList.remove('flash'),1500);break}
     case 'submit-yes':T.confirm=false;await submit();break;
     case 'submit-no':T.confirm=false;render();break;
     case 'result':T.cur=v;T.view='result';if(!T.results)render();T.results=await loadResults();render();break;

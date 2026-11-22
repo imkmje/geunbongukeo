@@ -22,20 +22,26 @@ function retryString(n,targets,draft){
   const set=new Set(targets);const d=String(draft||'');
   return Array.from({length:n},(_,i)=>set.has(i)?(/[0-5]/.test(d[i]||'')?d[i]:'0'):'-').join('');
 }
-/* 정답 공개 뒤: 다시 푼 결과. fixed=다시 풀어서 맞힘(실수형), again=또 틀림(개념형) */
+/* 정답 공개 뒤: 다시 푼 결과. fixed=다시 풀어서 맞힘(실수형), again=다시 골랐지만 또 틀림(개념형),
+   blank=다시 풀 때도 비워 둠('0'. 개념형으로 세지 않는다). targets=다시 풀 기회가 있던 자리 전체(fixed+again+blank).
+   rate=fixed/targets(예전과 같음), triedRate=fixed/(fixed+again): 실제로 다시 고른 문항 중 맞힌 비율 */
 function retryOutcome(key,retry){
   const r=String(retry||'');const k=Array.isArray(key)?key:String(key||'').split('');
-  const targets=[],fixed=[],again=[];
-  for(let i=0;i<r.length;i++){const c=r[i];if(c==='-')continue;targets.push(i);(c===k[i]?fixed:again).push(i)}
-  return {targets,fixed,again,rate:targets.length?fixed.length/targets.length:null};
+  const targets=[],fixed=[],again=[],blank=[];
+  for(let i=0;i<r.length;i++){const c=r[i];if(c==='-')continue;targets.push(i);
+    if(!/[1-5]/.test(c))blank.push(i);else (c===k[i]?fixed:again).push(i)}
+  const tried=fixed.length+again.length;
+  return {targets,fixed,again,blank,rate:targets.length?fixed.length/targets.length:null,triedRate:tried?fixed.length/tried:null};
 }
 /* 학생에게 보여 줄 한 줄 풀이 */
 function retryMessage(o){
   if(!o||!o.targets.length)return '';
-  const f=o.fixed.length,a=o.again.length;
-  if(!a)return `다시 풀어서 ${f}문항을 모두 맞혔습니다. 몰라서라기보다 서두르거나 근거를 덜 확인해서 틀린 '실수형' 오답입니다. 다음에는 고른 답의 근거 문장을 지문에서 한 번 더 확인해 보세요.`;
-  if(!f)return `다시 풀어도 ${a}문항을 또 틀렸습니다. 지문 이해나 개념이 아직 덜 잡힌 '개념형' 오답입니다. 해설을 천천히 읽고, 수업에서 설명한 근거를 다시 정리해 봅시다.`;
-  return `다시 풀어서 맞힌 ${f}문항은 '실수형', 또 틀린 ${a}문항은 '개념형' 오답입니다. 실수형은 근거를 확인하는 습관으로, 개념형은 해설과 수업 내용으로 보완해 봅시다.`;
+  const f=o.fixed.length,a=o.again.length,b=(o.blank||[]).length;
+  const bl=b?` 비워 둔 ${b}문항은 해설을 꼭 읽어 보세요.`:'';
+  if(!f&&!a)return `다시 풀 때 ${b}문항을 모두 비워 두었습니다. 아래 정답·해설을 꼭 읽어 보세요.`;
+  if(!a)return `다시 풀어서 ${f}문항을 ${b?'':'모두 '}맞혔습니다. 몰라서라기보다 서두르거나 근거를 덜 확인해서 틀린 '실수형' 오답입니다. 다음에는 고른 답의 근거 문장을 지문에서 한 번 더 확인해 보세요.`+bl;
+  if(!f)return `다시 풀어도 ${a}문항을 또 틀렸습니다. 지문 이해나 개념이 아직 덜 잡힌 '개념형' 오답입니다. 해설을 천천히 읽고, 수업에서 설명한 근거를 다시 정리해 봅시다.`+bl;
+  return `다시 풀어서 맞힌 ${f}문항은 '실수형', 또 틀린 ${a}문항은 '개념형' 오답입니다. 실수형은 근거를 확인하는 습관으로, 개념형은 해설과 수업 내용으로 보완해 봅시다.`+bl;
 }
 /* 교사 화면 4단계 표시. s={open,rel,kr,closed,done,due} → [{label,state:'done'|'now'|'todo'}] */
 function stageSteps(s){
