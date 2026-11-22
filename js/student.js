@@ -1,7 +1,8 @@
 "use strict";
 /* 근본국어 학생 화면: 학번 + 비밀번호로 로그인(처음 비밀번호는 학번, 첫 로그인 때 새로 정함) → 답안 제출, 내 결과, 누적 기록 */
 const sb=window.supabase.createClient(window.GB_CONFIG.url,window.GB_CONFIG.key,{auth:{persistSession:false}});
-const T={token:null,me:null,who:null,mustChange:false,view:'home',cur:null,draft:{},results:null,confirm:false,busy:false,msg:'',pwMsg:''};
+const T={token:null,me:null,who:null,mustChange:false,view:'home',cur:null,draft:{},results:null,confirm:false,busy:false,msg:'',pwMsg:'',notice:''};
+const CLOSED_NOTICE='응시가 닫혀 마지막 답안은 저장되지 않았습니다. 선생님께 말씀드리세요.';
 const TOKEN_KEY='gb-student-token';
 
 function saveToken(tok,who){T.token=tok;T.who=tok?(who||null):null;lsSet(TOKEN_KEY,tok?{tok,exp:Date.now()+11*3600e3,who:T.who}:null)}
@@ -10,16 +11,23 @@ function loadToken(){const v=lsGet(TOKEN_KEY,null);if(!(v&&v.exp>Date.now()))ret
 const dkey=tid=>(T.me?.sid||T.who?.sid||'')+':'+tid;
 const fmtTime=s=>s?new Date(s).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
 
+/* 로그인을 끊고 로그인 화면으로: 앞 학생의 결과·한마디가 같은 기기의 다음 학생에게 남지 않게 함께 비운다(임시 답안은 학번별이라 둔다). */
+function signOut(msg){saveToken(null);T.me=null;T.mustChange=false;T.results=null;T.cur=null;T.confirm=false;T.notice='';T.view='home';T.msg=msg||'';if(typeof RT!=='undefined')RT.note=undefined}
+/* 학생 함수 부르기. 로그인 문제(rpcErrorKind: js/student-logic.js)는 여기서 화면까지 처리하고, 오류에 handled 표시를 붙여 다시 던진다. */
 async function rpc(fn,args){
   const r=await sb.rpc(fn,args);
   if(r.error){
-    if(/invalid_session/.test(r.error.message||'')){saveToken(null);T.me=null;T.mustChange=false;T.view='home';T.msg='로그인 시간이 지났습니다. 다시 로그인해 주세요.';render();throw r.error}
-    if(/class_hidden/.test(r.error.message||'')){saveToken(null);T.me=null;T.mustChange=false;T.view='home';T.msg=loginErrorMsg('class_hidden');render();throw r.error}
-    if(/must_change_password/.test(r.error.message||'')){T.mustChange=true;T.pwMsg='';render();throw r.error}
+    const kind=rpcErrorKind(r.error);
+    if(kind==='session')signOut('로그인이 끊겼습니다. 다시 로그인해 주세요.');
+    else if(kind==='class_hidden')signOut(loginErrorMsg('class_hidden'));
+    else if(kind==='must_change'){T.mustChange=true;T.pwMsg=''}
+    if(kind){try{r.error.handled=true}catch(_){}render()}
     throw r.error;
   }
   return r.data;
 }
+/* 이미 화면에 안내한 오류(로그인 끊김 등)면 true: 따로 '문제가 생겼습니다'를 띄우지 않는다 */
+const errHandled=err=>!!(err&&(err.handled||rpcErrorKind(err)));
 async function refreshHome(){T.me=await rpc('student_home',{p_token:T.token})}
 
 /* ---------- 화면 ---------- */
@@ -43,11 +51,15 @@ function viewPw(forced){
   <button class="btn primary" type="submit">${forced?'저장하고 시작하기':'비밀번호 바꾸기'}</button><p class="sub" id="pwMsg" role="status" style="color:var(--bad)">${esc(T.pwMsg)}</p></form>
   ${forced?'<div class="row" style="margin-top:6px"><button class="btn ghost small" data-act="logout">로그아웃</button></div>':''}</div>`;
 }
+/* 시험 목록 맨 위 안내(닫기 단추나 다음 제출 성공 전까지 남음) */
+function noticeCard(){return T.notice?`<div class="card stu-notice" role="alert"><p>${esc(T.notice)}</p><button class="btn small ghost" data-act="notice-x">닫기</button></div>`:''}
+/* 시험 상태 꼬리표: 정답·해설 공개 > 결과 공개 > 응시 중 */
+const statePill=t=>t.key_released?'<span class="pill key">정답·해설 공개</span>':t.released?'<span class="pill rel">결과 공개</span>':t.is_open?'<span class="pill open">응시 중</span>':'';
 function viewHome(){
-  const ts=T.me.tests||[];
-  if(!T.me.class)return head()+`<div class="card empty"><h2>아직 반이 정해지지 않았습니다</h2><p>선생님께 방과후 반 명단에 넣어 달라고 말씀드려 주세요.</p></div>`;
-  if(!ts.length)return head()+`<div class="card empty"><h2>지금 볼 수 있는 시험이 없습니다</h2><p>선생님이 응시를 열거나 결과를 공개하면 여기에 나타납니다.</p></div>`;
-  return head()+`<div class="card"><h3>시험</h3><div class="focus-list">${ts.map(t=>`<div class="focus-item" style="grid-template-columns:1fr auto"><div style="min-width:0"><b>${esc(t.title)}</b><div class="why">${t.released?'<span class="pill rel">결과 공개</span>':t.is_open?'<span class="pill open">응시 중</span>':''}${t.retry_due?'<span class="pill" style="color:var(--omr-ink)">틀린 문항 다시 풀기</span>':''}${t.submitted_at?`<span class="pill draft">제출함 ${esc(fmtTime(t.submitted_at))}</span>`:'<span class="pill closed">아직 안 냄</span>'}</div></div><div class="row">${t.is_open?`<button class="btn red" data-act="take" data-v="${t.id}">${t.submitted_at?'답안 고치기':'답안 쓰기'}</button>`:''}${t.released?`<button class="btn" data-act="result" data-v="${t.id}">결과 보기</button>`:''}</div></div>`).join('')}</div></div>`;
+  const ts=studentTestSort(T.me.tests||[]);const top=head()+noticeCard();
+  if(!T.me.class)return top+`<div class="card empty"><h2>아직 반이 정해지지 않았습니다</h2><p>선생님께 방과후 반 명단에 넣어 달라고 말씀드려 주세요.</p></div>`;
+  if(!ts.length)return top+`<div class="card empty"><h2>지금 볼 수 있는 시험이 없습니다</h2><p>선생님이 응시를 열거나 결과를 공개하면 여기에 나타납니다.</p></div>`;
+  return top+`<div class="card"><h3>시험</h3><div class="focus-list">${ts.map(t=>`<div class="focus-item" style="grid-template-columns:1fr auto"><div style="min-width:0"><b>${esc(t.title)}</b><div class="why">${statePill(t)}${t.retry_due?'<span class="pill" style="color:var(--omr-ink)">틀린 문항 다시 풀기</span>':''}${t.submitted_at?`<span class="pill draft">제출함 ${esc(fmtTime(t.submitted_at))}</span>`:'<span class="pill closed">아직 안 냄</span>'}</div></div><div class="row">${t.is_open?`<button class="btn red" data-act="take" data-v="${t.id}">${t.submitted_at?'답안 고치기':'답안 쓰기'}</button>`:''}${t.released?`<button class="btn" data-act="result" data-v="${t.id}">결과 보기</button>`:''}</div></div>`).join('')}</div></div>`;
 }
 function viewTake(){
   const t=(T.me.tests||[]).find(x=>x.id===T.cur);
@@ -71,7 +83,8 @@ function paintTake(){
   const cf=$('#blankConfirm');if(cf)cf.innerHTML=blankSentence(list,10,blankBtn('omr-r'));
   return list;
 }
-function clsOf(row){const st=row.stats||{};return {n:st.n||0,avgPct:st.avgPct??null,ir:st.ir||[],dist:st.dist||[],area:st.area||{},type:st.type||{},nat:row.nat||null}}
+/* 반 통계(classStats: js/student-logic.js). 응시 인원이 적으면 hidden=true, 반 숫자는 모두 비어 있다 */
+function clsOf(row){return {...classStats(row.stats),nat:row.nat||null}}
 function allPicks(){const out=[];for(const row of T.results||[]){if(!row.answers||!row.tags||!row.key)continue;out.push(...tagPicks({items:row.items},row.key.split(''),row.tags,{a:row.answers,el:''},row.id))}return out}
 function viewResult(){
   const row=(T.results||[]).find(x=>x.id===T.cur);
@@ -91,7 +104,7 @@ function viewResult(){
   ${r.wrong.length?`<div class="card"><h3>틀린 문항 정답·해설</h3>${r.missedEasy.length?`<p class="sub" style="margin-bottom:4px">'N%가 맞힌 문항' 표시는 많은 학생이 맞혔는데 내가 놓친 문항입니다. 정답의 근거 문장을 지문에서 찾아 표시해 보세요.</p>`:''}<div class="focus-list">${r.wrong.map(card).join('')}</div></div>`:`<div class="card"><h3>모든 문항을 맞혔습니다</h3><p class="sub">풀이 시간을 줄이는 연습으로 넘어가 봅시다.</p></div>`}
   ${omrCard(t,{a:row.answers,el:''},key,true)}
   <details class="card more"><summary>영역·지문 세트 분석 보기</summary><div class="stack" style="margin-top:14px">
-   <div><h3>영역별 · 반과 비교</h3>${barRows(r.areaCmp.map(x=>({label:x.name,v:x.me,w:x.cls})),{a:'나',b:'반 평균'})}</div>
+   <div>${areaBars(r,cls)}</div>
    ${setList(r)}${tags}</div></details>`;
 }
 function viewHistory(){
@@ -99,7 +112,11 @@ function viewHistory(){
   if(!rows.length)return head()+overallFbCard()+`<div class="card empty"><h2>아직 공개된 결과가 없습니다</h2><p>결과가 공개된 시험이 쌓이면 회차별 변화를 여기서 볼 수 있습니다.</p></div>`;
   const data=rows.map(row=>{const t={items:row.items};const key=row.key.split('');const g=grade(t,key,{a:row.answers,el:''});const cls=clsOf(row);const nat=row.nat||[];const hi=g.idx.filter(i=>nat[i]?.r!=null);
     return {label:row.title,id:row.id,me:g.pct,score:g.score,max:g.max,cls:cls.avgPct,hm:hi.length>=2?hi.filter(i=>g.res[i]).length/hi.length:null,hn:hi.length>=2?hi.reduce((a,i)=>a+nat[i].r,0)/hi.length:null}});
-  return head()+overallFbCard()+`<div class="grid2"><div class="card"><h3>회차별 점수 (100점 환산)</h3>${lineChart(data.map(x=>x.label),[{name:'나',color:'var(--s2)',values:data.map(x=>x.me)},{name:'반 평균',color:'var(--s1)',values:data.map(x=>x.cls)}])}</div>
+  // 반 평균이 없는 회차(응시 인원이 적음)는 반 평균 선에서 그 점만 건너뛴다. 한 번도 없으면 선을 그리지 않고, 안내는 한 번만.
+  const noCls=data.filter(x=>x.cls==null).length;
+  const series=[{name:'나',color:'var(--s2)',values:data.map(x=>x.me)}];if(noCls<data.length)series.push({name:'반 평균',color:'var(--s1)',values:data.map(x=>x.cls)});
+  const clsNote=noCls?`<p class="sub cls-hidden">${noCls===data.length?'':'반 평균이 빈 회차는 '}${esc(CLS_HIDDEN_MSG)}</p>`:'';
+  return head()+overallFbCard()+`<div class="grid2"><div class="card"><h3>회차별 점수 (100점 환산)</h3>${lineChart(data.map(x=>x.label),series)}${clsNote}</div>
   ${data.some(x=>x.hm!=null)?`<div class="card"><h3>어려운 문항 정답률 (전국 오답률 상위 15문항)</h3>${natTrendChart(data.map(x=>x.label),[{name:'나',color:'var(--s2)',values:data.map(x=>x.hm)},{name:'전국',color:'var(--muted)',values:data.map(x=>x.hn)}])}<p class="sub">시험마다 난도가 달라서, 전국에서 많이 틀린 문항만 따로 모아 전국 정답률과 비교합니다.</p></div>`:''}</div>
   ${tagCard(allPicks(),null,'s')}
   <div class="card"><h3>시험별 결과</h3><div class="tbl-wrap"><table class="hist-tbl"><thead><tr><th>시험</th><th class="n">내 점수<br><small>(100점 환산)</small></th><th class="n">반 평균<br><small>(100점 환산)</small></th><th class="hist-more"></th></tr></thead><tbody>${data.map(x=>{const av=pct100(x.cls);return `<tr><td><button type="button" class="hist-link" data-act="result" data-v="${x.id}">${esc(x.label)}</button></td><td class="n" title="${x.max}점 만점에 ${x.score}점"><b>${score100(x.score,x.max)??'–'}점</b><div class="raw">${x.score}/${x.max}</div></td><td class="n"${av!=null?` title="${x.max}점 만점에 ${oneDec(x.cls*x.max)}점"`:''}>${av!=null?`${av}점<div class="raw">${oneDec(x.cls*x.max)}/${x.max}</div>`:'–'}</td><td class="hist-more"><button class="btn small" data-act="result" data-v="${x.id}">자세히</button></td></tr>`}).join('')}</tbody></table></div></div>`;
@@ -137,11 +154,12 @@ document.addEventListener('submit',async e=>{
     if(!d.ok){T.pwMsg={wrong_old:'지금 비밀번호가 맞지 않습니다.',too_short:`비밀번호는 ${PW_MIN}자 이상이어야 합니다.`,too_long:'비밀번호가 너무 깁니다. 조금 짧게 정해 주세요.',same_as_sid:'학번과 같은 비밀번호는 쓸 수 없습니다.'}[d.error]||'바꾸지 못했습니다. 다시 시도해 주세요.';msg.textContent=T.pwMsg;return}
     T.mustChange=false;T.pwMsg='';T.view='home';toast('새 비밀번호를 저장했습니다');
     await refreshHome();render();
-  }catch(err){if(!/invalid_session|class_hidden/.test(err?.message||''))msg.textContent='서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요.'}
+  }catch(err){if(!errHandled(err))msg.textContent='서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요.'}
 });
 document.addEventListener('click',async e=>{
   const b=e.target.closest('[data-act]');if(!b)return;const v=b.dataset.v;
   try{switch(b.dataset.act){
+    case 'notice-x':T.notice='';render();break;
     case 'home':T.view='home';T.confirm=false;await refreshHome();render();break;
     case 'take':T.cur=v;T.view='take';T.confirm=false;render();break;
     case 'pw':T.view='pw';T.pwMsg='';render();break;
@@ -152,15 +170,21 @@ document.addEventListener('click',async e=>{
     case 'submit-no':T.confirm=false;render();break;
     case 'result':T.cur=v;T.view='result';if(!T.results)render();T.results=await loadResults();render();break;
     case 'history':T.view='history';render();[T.results]=await Promise.all([loadResults(),loadNote()]);render();break;
-    case 'logout':try{await sb.rpc('student_logout',{p_token:T.token})}catch(_){}saveToken(null);T.me=null;T.mustChange=false;T.results=null;T.msg='';T.view='home';render();break;
-  }}catch(err){console.error(err);if(!/invalid_session|must_change_password|class_hidden/.test(err?.message||''))toast('문제가 생겼습니다. 잠시 뒤 다시 시도해 주세요.')}
+    case 'logout':try{await sb.rpc('student_logout',{p_token:T.token})}catch(_){}signOut('');render();break;
+  }}catch(err){console.error(err);if(!errHandled(err))toast('문제가 생겼습니다. 잠시 뒤 다시 시도해 주세요.')}
 });
 async function submit(){
   T.busy=true;render();
   const dr=T.draft[dkey(T.cur)];
   try{const d=await rpc('student_submit',{p_token:T.token,p_test:T.cur,p_answers:dr.a});
-    if(d.ok){toast('제출했습니다');delete T.draft[dkey(T.cur)];lsSet('gb-draft',T.draft);await refreshHome();T.view='home'}
-    else toast(d.error==='closed'?'응시가 닫혀서 낼 수 없습니다':'답안 형식이 맞지 않습니다. 새로고침 뒤 다시 시도해 주세요');
+    if(d.ok){toast('제출했습니다');T.notice='';delete T.draft[dkey(T.cur)];lsSet('gb-draft',T.draft);await refreshHome();T.view='home'}
+    else if(d.error==='closed'){
+      // 쓰는 사이에 응시가 닫힘: 목록으로 돌아가 닫을 때까지 남는 안내를 띄운다. 임시 답안은 지우지 않는다(선생님이 다시 열면 이어서 낼 수 있게).
+      T.notice=CLOSED_NOTICE;T.view='home';T.confirm=false;
+      try{await refreshHome()}catch(err){if(!errHandled(err))console.error(err)}
+      window.scrollTo(0,0);
+    }
+    else toast('답안 형식이 맞지 않습니다. 새로고침 뒤 다시 시도해 주세요');
   }finally{T.busy=false;render()}
 }
 (async function boot(){
