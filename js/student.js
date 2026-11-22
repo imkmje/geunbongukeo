@@ -47,7 +47,7 @@ function viewHome(){
   const ts=T.me.tests||[];
   if(!T.me.class)return head()+`<div class="card empty"><h2>아직 반이 정해지지 않았습니다</h2><p>선생님께 방과후 반 명단에 넣어 달라고 말씀드려 주세요.</p></div>`;
   if(!ts.length)return head()+`<div class="card empty"><h2>지금 볼 수 있는 시험이 없습니다</h2><p>선생님이 응시를 열거나 결과를 공개하면 여기에 나타납니다.</p></div>`;
-  return head()+`<div class="card"><h3>시험</h3><div class="focus-list">${ts.map(t=>`<div class="focus-item" style="grid-template-columns:1fr auto"><div style="min-width:0"><b>${esc(t.title)}</b><div class="why">${t.released?'<span class="pill rel">결과 공개</span>':t.is_open?'<span class="pill open">응시 중</span>':''}${t.submitted_at?`<span class="pill draft">제출함 ${esc(fmtTime(t.submitted_at))}</span>`:'<span class="pill closed">아직 안 냄</span>'}</div></div><div class="row">${t.is_open?`<button class="btn red" data-act="take" data-v="${t.id}">${t.submitted_at?'답안 고치기':'답안 쓰기'}</button>`:''}${t.released?`<button class="btn" data-act="result" data-v="${t.id}">결과 보기</button>`:''}</div></div>`).join('')}</div></div>`;
+  return head()+`<div class="card"><h3>시험</h3><div class="focus-list">${ts.map(t=>`<div class="focus-item" style="grid-template-columns:1fr auto"><div style="min-width:0"><b>${esc(t.title)}</b><div class="why">${t.released?'<span class="pill rel">결과 공개</span>':t.is_open?'<span class="pill open">응시 중</span>':''}${t.retry_due?'<span class="pill" style="color:var(--omr-ink)">틀린 문항 다시 풀기</span>':''}${t.submitted_at?`<span class="pill draft">제출함 ${esc(fmtTime(t.submitted_at))}</span>`:'<span class="pill closed">아직 안 냄</span>'}</div></div><div class="row">${t.is_open?`<button class="btn red" data-act="take" data-v="${t.id}">${t.submitted_at?'답안 고치기':'답안 쓰기'}</button>`:''}${t.released?`<button class="btn" data-act="result" data-v="${t.id}">결과 보기</button>`:''}</div></div>`).join('')}</div></div>`;
 }
 function viewTake(){
   const t=(T.me.tests||[]).find(x=>x.id===T.cur);
@@ -66,23 +66,25 @@ function viewResult(){
   const row=(T.results||[]).find(x=>x.id===T.cur);
   if(!row)return head()+`<div class="card empty"><h2>결과를 불러오는 중입니다</h2></div>`;
   if(!row.answers)return head()+`<div class="card empty"><h2>${esc(row.title)}: 낸 답안이 없습니다</h2><p>종이로 냈다면 선생님이 입력하신 뒤에 결과가 보입니다.</p></div>`;
+  if(row.keyHidden)return head()+viewResultPre(row);// js/student-retry.js: 정답·해설 공개 전
   const t={title:row.title,items:row.items};const key=(row.key||'').split('');const cls=clsOf(row);
   const r=report(t,key,{a:row.answers,el:''},cls);
   const card=(x,extra)=>`<div class="focus-item"><div class="qno">${esc(x.no)}</div><div style="min-width:0">${esc(x.area)} · ${esc(x.type||'')}<div class="why"><span class="pill" style="color:var(--bad)">내 답 ${x.mine==='0'?'무응답':CIR[+x.mine]}</span><span class="pill" style="color:var(--s1)">정답 ${CIR[+x.ans]}</span></div>${extra||''}</div><div class="num" style="text-align:right">${x.rate!=null?'반 '+pct(x.rate):''}${x.nr!=null?`<br><span class="muted">전국 ${pct(x.nr)}</span>`:''}</div></div>`;
   return head()+`<div class="card"><h2>${esc(row.title)} 결과</h2><div class="tiles" style="margin-top:10px"><div class="tile"><div class="k">내 점수</div><div class="v">${r.score}<small> / ${r.max}</small></div></div><div class="tile"><div class="k">반 평균 (100점 환산)</div><div class="v">${cls.avgPct!=null?Math.round(cls.avgPct*100):'–'}<small> 점</small></div></div><div class="tile"><div class="k">틀린 문항</div><div class="v">${r.wrong.length}<small> 개</small></div></div></div></div>
+  ${resultExtras(row)}
   <div class="grid2"><div class="card"><h3>많은 학생이 맞혔는데 내가 놓친 문항</h3>${r.missedEasy.length?`<div class="focus-list">${r.missedEasy.map(x=>card(x)).join('')}</div><p class="sub" style="margin-top:8px">이 문항들은 다시 풀면서 정답의 근거가 되는 문장을 지문에서 찾아 표시해 보세요.</p>`:'<p class="muted">없습니다. 쉬운 문항을 잘 챙겼습니다.</p>'}</div>
   <div class="card"><h3>영역별 · 반과 비교</h3>${barRows(r.areaCmp.map(x=>({label:x.name,v:x.me,w:x.cls})),{a:'나',b:'반 평균'})}</div></div>
   ${setCard(r)}${tagCard(allPicks(),null,'s')}
   ${r.rare.length?`<div class="card"><h3>드물게 고른 오답</h3><p class="sub" style="margin-bottom:8px">다른 응시자가 거의 고르지 않은 선지를 골라 틀린 문항입니다. 발문(맞는 것/않은 것)을 거꾸로 읽지 않았는지, 지문을 잘못 이해하지 않았는지, 마킹을 잘못하지 않았는지 확인해 보세요.</p><div class="focus-list">${r.rare.map(x=>card(x)).join('')}</div></div>`:''}
-  ${r.wrong.length?`<div class="card"><h3>틀린 문항 다시 보기</h3><div class="focus-list">${r.wrong.map(x=>card(x,exBlock(row.ex?.[x.i]))).join('')}</div></div>`:''}
+  ${r.wrong.length?`<div class="card"><h3>틀린 문항 다시 보기</h3><div class="focus-list">${r.wrong.map(x=>card(x,retryPill(row,x.i)+exBlock(row.ex?.[x.i]))).join('')}</div></div>`:''}
   ${omrCard(t,{a:row.answers,el:''},key,true)}`;
 }
 function viewHistory(){
   const rows=(T.results||[]).filter(x=>x.answers&&x.key);
-  if(!rows.length)return head()+`<div class="card empty"><h2>아직 공개된 결과가 없습니다</h2><p>결과가 공개된 시험이 쌓이면 회차별 변화를 여기서 볼 수 있습니다.</p></div>`;
+  if(!rows.length)return head()+overallFbCard()+`<div class="card empty"><h2>아직 공개된 결과가 없습니다</h2><p>결과가 공개된 시험이 쌓이면 회차별 변화를 여기서 볼 수 있습니다.</p></div>`;
   const data=rows.map(row=>{const t={items:row.items};const key=row.key.split('');const g=grade(t,key,{a:row.answers,el:''});const cls=clsOf(row);const nat=row.nat||[];const hi=g.idx.filter(i=>nat[i]?.r!=null);
     return {label:row.title,id:row.id,me:g.pct,score:g.score,max:g.max,cls:cls.avgPct,hm:hi.length>=2?hi.filter(i=>g.res[i]).length/hi.length:null,hn:hi.length>=2?hi.reduce((a,i)=>a+nat[i].r,0)/hi.length:null}});
-  return head()+`<div class="grid2"><div class="card"><h3>회차별 점수 (100점 환산)</h3>${lineChart(data.map(x=>x.label),[{name:'나',color:'var(--s2)',values:data.map(x=>x.me)},{name:'반 평균',color:'var(--s1)',values:data.map(x=>x.cls)}])}</div>
+  return head()+overallFbCard()+`<div class="grid2"><div class="card"><h3>회차별 점수 (100점 환산)</h3>${lineChart(data.map(x=>x.label),[{name:'나',color:'var(--s2)',values:data.map(x=>x.me)},{name:'반 평균',color:'var(--s1)',values:data.map(x=>x.cls)}])}</div>
   ${data.some(x=>x.hm!=null)?`<div class="card"><h3>어려운 문항 정답률 (전국 오답률 상위 15문항)</h3>${lineChart(data.map(x=>x.label),[{name:'나',color:'var(--s2)',values:data.map(x=>x.hm)},{name:'전국',color:'var(--muted)',values:data.map(x=>x.hn)}])}<p class="sub">시험마다 난도가 달라서, 전국에서 많이 틀린 문항만 따로 모아 전국 정답률과 비교합니다.</p></div>`:''}</div>
   ${tagCard(allPicks(),null,'s')}
   <div class="card"><h3>시험별 결과</h3><div class="tbl-wrap"><table><thead><tr><th>시험</th><th class="n">점수</th><th class="n">반 평균</th><th></th></tr></thead><tbody>${data.map(x=>`<tr><td>${esc(x.label)}</td><td class="n">${x.score}/${x.max}</td><td class="n">${x.cls!=null?Math.round(x.cls*100)+'점':'–'}</td><td><button class="btn small" data-act="result" data-v="${x.id}">자세히</button></td></tr>`).join('')}</tbody></table></div></div>`;
@@ -92,7 +94,7 @@ function render(){
   if(T.token&&T.mustChange){app.innerHTML=viewPw(true);return}
   if(!T.token||!T.me){app.innerHTML=viewLogin();return}
   if(T.view==='pw'){app.innerHTML=`<div class="stack">${viewPw(false)}</div>`;return}
-  app.innerHTML=`<div class="stack">${({home:viewHome,take:viewTake,result:viewResult,history:viewHistory}[T.view]||viewHome)()}</div>`;
+  app.innerHTML=`<div class="stack">${({home:viewHome,take:viewTake,result:viewResult,history:viewHistory,retry:viewRetry}[T.view]||viewHome)()}</div>`;
 }
 
 /* ---------- 동작 ---------- */
@@ -131,8 +133,8 @@ document.addEventListener('click',async e=>{
     case 'submit':{const dr=T.draft[dkey(T.cur)];if(dr.a.includes('0')){T.confirm=true;render();break}await submit();break}
     case 'submit-yes':T.confirm=false;await submit();break;
     case 'submit-no':T.confirm=false;render();break;
-    case 'result':T.cur=v;T.view='result';if(!T.results)render();T.results=await rpc('student_results',{p_token:T.token,p_test:null});render();break;
-    case 'history':T.view='history';render();T.results=await rpc('student_results',{p_token:T.token,p_test:null});render();break;
+    case 'result':T.cur=v;T.view='result';if(!T.results)render();T.results=await loadResults();render();break;
+    case 'history':T.view='history';render();[T.results]=await Promise.all([loadResults(),loadNote()]);render();break;
     case 'logout':try{await sb.rpc('student_logout',{p_token:T.token})}catch(_){}saveToken(null);T.me=null;T.mustChange=false;T.results=null;T.msg='';T.view='home';render();break;
   }}catch(err){console.error(err);if(!/invalid_session|must_change_password|class_hidden/.test(err?.message||''))toast('문제가 생겼습니다. 잠시 뒤 다시 시도해 주세요.')}
 });

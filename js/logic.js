@@ -131,4 +131,27 @@ function testOrder(a,b){
     ||(a.created||'').localeCompare(b.created||'');
 }
 
-if(typeof module!=='undefined'&&module.exports)module.exports={testOrder,visibleClasses,loginErrorMsg,rosterPlan,parseNat,parseEx,parseRanges,pwProblem,PW_MIN,EX_MAX};
+/* 설명할 문항 순서(정답·해설 공개 전 설명 수업용). 학생 이름 없이 숫자만 돌려준다.
+   items: 시험 문항 [{no,area,type,el}], key: 정답(문자열 또는 배열),
+   submissions: 처음 답안 목록(문자열 또는 {a}/{answers}), retries: 다시 풀기 답 목록(문자열 또는 {answers}; 다시 안 푼 문항은 '-').
+   틀린 학생이 있는 문항만, '다시 풀어도 또 틀린 수(개념형)' 많은 순 → 처음 오답률 높은 순 → 문항 순서. */
+function explainPriority(items,key,submissions,retries){
+  const str=x=>typeof x==='string'?x:(x&&(x.a??x.answers))||'';
+  const subs=(submissions||[]).map(str).filter(Boolean),rts=(retries||[]).map(str).filter(Boolean);
+  const out=[];
+  (items||[]).forEach((it,i)=>{
+    const k=String(key?.[i]??'');if(!/^[1-5]$/.test(k)||(it&&it.el))return;
+    let n=0,wrong=0;const pick=[0,0,0,0,0,0];
+    for(const a of subs){n++;const c=a[i]||'0';if(c!==k){wrong++;if(/[1-5]/.test(c))pick[+c]++}}
+    if(!wrong)return;
+    let retried=0,fixed=0;
+    for(const r of rts){const c=r[i];if(c==null||c==='-')continue;retried++;if(c===k)fixed++}
+    let opt=0;for(let o=1;o<=5;o++)if(pick[o]>pick[opt])opt=o;
+    out.push({i,no:it?.no??String(i+1),area:it?.area||'',type:it?.type||'',n,wrong,wrongRate:n?wrong/n:0,
+      retried,fixed,again:retried-fixed,notRetried:Math.max(0,wrong-retried),
+      topWrong:opt?{opt,count:pick[opt],share:pick[opt]/n}:null});
+  });
+  return out.sort((a,b)=>b.again-a.again||b.wrongRate-a.wrongRate||a.i-b.i);
+}
+
+if(typeof module!=='undefined'&&module.exports)module.exports={testOrder,visibleClasses,loginErrorMsg,rosterPlan,parseNat,parseEx,parseRanges,pwProblem,PW_MIN,EX_MAX,explainPriority};

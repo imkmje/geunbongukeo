@@ -1,0 +1,54 @@
+/* 선생님 한마디 · 틀린 문항 다시 풀기 · 공개 단계 (js/feedback.js, js/student-retry.js) */
+/* 교사: 4단계 표시 */
+.stage-list{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+.stage-row{display:grid;grid-template-columns:auto 1fr auto;gap:8px 14px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--bg)}
+.stage-cls{white-space:nowrap}
+.stage{display:flex;flex-wrap:wrap;gap:4px 0;margin:0;padding:0;list-style:none;font-size:13px}
+.stage li{display:flex;align-items:center;gap:6px;color:var(--muted);white-space:nowrap}
+.stage li+li::before{content:"";display:inline-block;width:18px;height:1.5px;background:var(--line2);margin:0 6px}
+.stage .st-n{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;border:1.5px solid var(--line2);font-size:11.5px;font-weight:700;font-family:var(--f-mono)}
+.stage li.st-done{color:var(--ink2)}
+.stage li.st-done .st-n{background:var(--good);border-color:var(--good);color:#fff}
+.stage li.st-now{color:var(--ink);font-weight:700}
+.stage li.st-now .st-n{border-color:var(--omr);color:var(--omr-ink);background:var(--omr-soft)}
+.stage-btns{justify-content:flex-end;gap:6px}
+@media (max-width:760px){.stage-row{grid-template-columns:1fr}.stage{flex-direction:column;gap:6px}.stage li+li::before{display:none}.stage-btns{justify-content:flex-start}}
+/* 교사: 한마디 입력 */
+.fb-ed{display:flex;flex-direction:column;gap:6px}
+.fb-ed textarea{font-family:var(--f-body);font-size:14px;line-height:1.6}
+.fb-foot{gap:8px}
+.fb-sp{flex:1}
+.fb-count{font-size:12.5px;color:var(--muted)}
+.fb-count.over{color:var(--bad);font-weight:700}
+.fb-state{font-size:12.5px;color:var(--muted)}
+.fb-state.good{color:var(--good)} .fb-state.warn{color:var(--warn);font-weight:600}
+.fb-chips{margin-bottom:10px;max-height:132px;overflow-y:auto}
+.fb-chip{font-size:12.5px;padding:4px 9px}
+.fb-chip.has{border-color:var(--good);color:var(--good)}
+.fb-chip.has[aria-pressed="true"]{color:var(--paper);background:var(--good);border-color:var(--good)}
+.fb-tbl td.nm{white-space:nowrap;font-weight:500}
+.fb-tbl td.fb-prev{max-width:280px;color:var(--ink2)}
+.fb-tbl tr.fb-open td{background:var(--omr-soft)}
+.fb-tbl tr.fb-edrow td{background:var(--bg);padding:10px 12px}
+@media (max-width:640px){.fb-tbl td.fb-prev{max-width:140px}}
+/* 학생: 한마디 */
+.fb-note{border-left:4px solid var(--omr)}
+.fb-note .fb-body{white-space:pre-line;font-size:15.5px;line-height:1.7;margin:0 0 6px}
+/* 학생: 다시 풀기 */
+.rt-cta{border:1.5px solid var(--omr);background:var(--omr-soft)}
+.rt-cta h2{color:var(--omr-ink)}
+.rt-row{grid-template-columns:34px repeat(5,30px) auto}
+.rt-first{font-size:12px;color:var(--muted);padding-left:6px;white-space:nowrap}
+@media (pointer:coarse){.omr-row.rt-row{grid-template-columns:34px repeat(5,minmax(0,40px)) auto}}
+.rt-list{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px}
+.rt-pair{white-space:nowrap}
+.rt-h{font-size:13.5px;margin:0 0 6px}
+.rt-h.good{color:var(--good)} .rt-h.bad{color:var(--bad)}
+.ox-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(44px,1fr));gap:6px}
+.ox{display:flex;flex-direction:column;align-items:center;border:1px solid var(--line);border-radius:6px;padding:3px 0;font-size:12px;line-height:1.3}
+.ox b{font-size:15px;font-family:var(--f-mono)}
+.ox-O b{color:var(--good)} .ox-X{background:color-mix(in oklab,var(--bad) 9%,var(--paper));border-color:color-mix(in oklab,var(--bad) 40%,transparent)} .ox-X b{color:var(--bad)}
+.ox-B{background:repeating-linear-gradient(45deg,var(--bg) 0 4px,var(--paper) 4px 8px)} .ox-B b{color:var(--muted)}
+.ox-i{border:1px solid var(--line2)}
+.ox-i.ox-O{background:var(--paper)} .ox-i.ox-X{background:color-mix(in oklab,var(--bad) 30%,var(--paper))}
+.omr-cols.rt-cols{grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr))}
