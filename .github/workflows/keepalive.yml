@@ -1,0 +1,26 @@
+name: keepalive
+
+# 무료 Supabase 프로젝트는 오래 접속이 없으면 자동으로 멈춘다.
+# 매일 한 번 접속 확인용 함수(keepalive)를 불러 멈추지 않게 한다.
+# 아래 URL과 키는 공개해도 되는 값(Project URL, publishable key)이라 비밀 설정이 필요 없다.
+
+on:
+  schedule:
+    - cron: "23 18 * * *" # 매일 한국 시간 새벽 3시 23분
+  workflow_dispatch: # Actions 탭에서 수동 실행도 가능
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call keepalive()
+        env:
+          SUPABASE_URL: https://jvmpkcvxjsbmdhetooqe.supabase.co
+          SUPABASE_KEY: sb_publishable_NRLhgnWY6QTwNNI7ZjVE6w_1q4MpbH-
+        run: |
+          curl --fail --silent --show-error --retry 3 --retry-delay 10 \
+            -X POST "$SUPABASE_URL/rest/v1/rpc/keepalive" \
+            -H "apikey: $SUPABASE_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{}'
+          echo
