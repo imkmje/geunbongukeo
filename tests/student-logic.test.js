@@ -51,3 +51,23 @@ test('noRange: 이어지는 번호는 2~5번처럼',()=>{
   assert.equal(S.noRange(['7']),'7번');
   assert.equal(S.noRange([]),'');
 });
+
+test('newDeviceId · deviceIdOk: 로그인 기기 번호는 32자 16진수, 서버가 받는 모양만 통과',()=>{
+  const id=S.newDeviceId(n=>Array.from({length:n},(_,i)=>i*17));
+  assert.equal(id,'00112233445566778899aabbccddeeff');
+  assert.ok(S.deviceIdOk(id));
+  const a=S.newDeviceId(),b=S.newDeviceId();
+  assert.match(a,/^[0-9a-f]{32}$/);assert.notEqual(a,b,'만들 때마다 다름');
+  assert.ok(S.deviceIdOk('abc_DEF-0123456789'),'영문·숫자·_- 16자 이상');
+  for(const bad of [null,undefined,'','short','x'.repeat(65),'has space 0123456789','quote"0123456789abc',123456789012345678,{}])
+    assert.equal(S.deviceIdOk(bad),false,String(bad));
+});
+
+test('rpcMissing: 서버에 함수가 없을 때(PGRST202)만 true — 예전 student_login으로 넘어간다',()=>{
+  assert.equal(S.rpcMissing({code:'PGRST202',message:'Could not find the function public.student_login_dev(p_device, p_password, p_sid) in the schema cache'}),true);
+  assert.equal(S.rpcMissing({message:'Could not find the function public.student_login_dev'}),true,'코드가 없어도 문구로');
+  assert.equal(S.rpcMissing(null),false);
+  assert.equal(S.rpcMissing({code:'PGRST203',message:'Could not choose the best candidate function'}),false,'함수가 둘이라 못 고름은 다른 오류');
+  assert.equal(S.rpcMissing({code:'42501',message:'permission denied for function student_login_dev'}),false);
+  assert.equal(S.rpcMissing({message:'Failed to fetch'}),false,'연결 실패는 아님');
+});

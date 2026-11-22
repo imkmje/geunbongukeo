@@ -5,7 +5,8 @@
    - noRange: 문항 번호를 '2~5번'처럼 줄여 쓰기
    - classStats: 서버가 준 반 통계를 화면용으로 고르기(응시 인원이 적으면 서버가 null을 준다)
    - studentTestSort: 학생 시험 목록 순서
-   - rpcErrorKind: 학생 함수 오류를 종류별로 나누기 */
+   - rpcErrorKind: 학생 함수 오류를 종류별로 나누기
+   - newDeviceId · deviceIdOk · rpcMissing: 로그인 기기 번호와 '서버에 그 함수가 없음' 알아보기 */
 
 /* 원점수 → 100점 환산 점수(정수, 반올림). 만점이 없으면 null */
 function score100(score,max){
@@ -83,4 +84,19 @@ function rpcErrorKind(err){
   return null;
 }
 
-if(typeof module!=='undefined'&&module.exports)module.exports={score100,pct100,oneDec,blankList,blankNos,blankSentence,noRange,CLS_HIDDEN_MSG,classStats,studentTestSort,rpcErrorKind};
+/* 로그인 기기 번호: 브라우저마다 한 번 만들어 저장해 두는 무작위 32자(16진수). 서버 student_login_dev가 받는다
+   (기본 규칙에서는 쓰지 않고, 잠금 방식 D를 고르면 '로그인했던 기기'를 알아보는 데 쓴다). 비밀번호가 아니다.
+   rnd(n): 0~255 바이트 n개를 돌려주는 함수(테스트용). 없으면 crypto.getRandomValues, 그것도 없으면 Math.random. */
+function newDeviceId(rnd){
+  const bytes=rnd?rnd(16):(typeof crypto!=='undefined'&&crypto.getRandomValues)?crypto.getRandomValues(new Uint8Array(16)):Array.from({length:16},()=>Math.floor(Math.random()*256));
+  return Array.from(bytes,b=>(b&255).toString(16).padStart(2,'0')).join('');
+}
+/* 서버가 받는 모양(영문·숫자·_- 16~64자)인지 */
+const deviceIdOk=v=>typeof v==='string'&&/^[A-Za-z0-9_-]{16,64}$/.test(v);
+/* rpc 오류가 '서버에 그 함수가 없음'(아직 새 SQL을 실행하지 않은 서버)인지: PostgREST PGRST202 */
+function rpcMissing(err){
+  if(!err)return false;
+  return err.code==='PGRST202'||/could not find the function/i.test(String(err.message||''));
+}
+
+if(typeof module!=='undefined'&&module.exports)module.exports={score100,pct100,oneDec,blankList,blankNos,blankSentence,noRange,CLS_HIDDEN_MSG,classStats,studentTestSort,rpcErrorKind,newDeviceId,deviceIdOk,rpcMissing};
