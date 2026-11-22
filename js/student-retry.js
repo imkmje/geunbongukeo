@@ -19,11 +19,18 @@ const fmtDay=s=>s?new Date(s).toLocaleString('ko-KR',{month:'numeric',day:'numer
 function fbBox(fb,title){return `<div class="card fb-note"><h3>${esc(title)}</h3><p class="fb-body">${esc(fb.body)}</p><p class="sub">${esc(fmtDay(fb.updated_at))}</p></div>`}
 
 /* ----- 결과 화면 공통 조각 ----- */
-/* 점수 칸: 100점 환산을 크게, 원점수는 작게. third=세 번째 칸 html */
+/* 점수 칸: 100점 환산을 크게, 원점수는 작게. third=세 번째 칸 html.
+   반 평균이 없으면(응시 인원이 적음, cls.hidden) 반 평균 칸 대신 안내 한 줄. 결과 화면에서 이 안내는 여기 한 번만 나온다. */
 function scoreTiles(r,cls,third){
-  const me=score100(r.score,r.max),av=pct100(cls.avgPct);
+  const me=score100(r.score,r.max),av=cls.hidden?null:pct100(cls.avgPct);
+  const avTile=av!=null?`<div class="tile"><div class="k">반 평균 (100점 환산)</div><div class="v">${av}<small>점</small></div><div class="raw">${r.max}점 만점에 ${oneDec(cls.avgPct*r.max)}점</div></div>`:'';
   return `<div class="tiles" style="margin-top:10px"><div class="tile"><div class="k">내 점수 (100점 환산)</div><div class="v">${me??'–'}<small>점</small></div><div class="raw">${r.max}점 만점에 ${r.score}점</div></div>
-   <div class="tile"><div class="k">반 평균 (100점 환산)</div><div class="v">${av??'–'}<small>점</small></div>${av!=null?`<div class="raw">${r.max}점 만점에 ${oneDec(cls.avgPct*r.max)}점</div>`:''}</div>${third}</div>`;
+   ${avTile}${third}</div>${av==null?`<p class="sub cls-hidden">${esc(CLS_HIDDEN_MSG)}</p>`:''}`;
+}
+/* 영역별 막대: 반 통계가 있으면 '나'와 '반 평균', 없으면 '나'만(안내는 점수 칸에서 이미 함) */
+function areaBars(r,cls){
+  if(cls.hidden)return `<h3>영역별 정답률</h3>${barRows(r.areaCmp.map(x=>({label:x.name,v:x.me})),{a:'나'})}`;
+  return `<h3>영역별 · 반과 비교</h3>${barRows(r.areaCmp.map(x=>({label:x.name,v:x.me,w:x.cls})),{a:'나',b:'반 평균'})}`;
 }
 /* 문항별 O/X 표시: ○ 맞음, ✕ 틀림, 비움 (O를 0으로 잘못 읽지 않게) */
 const OX_LAB={O:'맞음',X:'틀림',B:'비움'},OX_SYM={O:'○',X:'✕',B:'비움'};
@@ -52,7 +59,7 @@ function viewResultPre(row){
   return `${top}<div class="card"><h2>${esc(row.title)} 결과</h2><p class="sub">지금은 점수와 맞음/틀림만 보입니다. 정답·해설은 아직 공개되지 않았습니다.</p>
    ${scoreTiles(r,cls,`<div class="tile"><div class="k">틀린 문항</div><div class="v">${tg.length}<small>개${blanks?` (비움 ${blanks})`:''}</small></div></div>`)}</div>
    <div class="card"><h3>문항별 맞음 · 틀림</h3>${oxLegend()}<div class="ox-grid">${cells}</div></div>
-   <div class="grid2"><div class="card"><h3>영역별 · 반과 비교</h3>${barRows(r.areaCmp.map(x=>({label:x.name,v:x.me,w:x.cls})),{a:'나',b:'반 평균'})}</div>${setList(r)||'<div></div>'}</div>`;
+   <div class="grid2"><div class="card">${areaBars(r,cls)}</div>${setList(r)||'<div></div>'}</div>`;
 }
 
 /* ----- 다시 풀기 답안지 ----- */
@@ -110,10 +117,10 @@ document.addEventListener('click',async e=>{
     case 'rt-yes':{RT.confirm=false;const row=(T.results||[]).find(x=>x.id===T.cur);if(!row)break;const k=rtKey(row.id);
       RT.busy=true;render();
       try{const d=await rpc('student_retry_submit',{p_token:T.token,p_test:row.id,p_answers:retryString(row.items.length,retryTargets(row.ox),RT.draft[k])});
-        if(d&&d.ok){toast('다시 푼 답을 냈습니다');delete RT.draft[k];lsSet('gb-rt-draft',RT.draft)}
+        if(d&&d.ok){toast('다시 푼 답을 냈습니다');T.notice='';delete RT.draft[k];lsSet('gb-rt-draft',RT.draft)}
         else toast({already:'이미 다시 푼 답을 냈습니다',key_released:'정답이 이미 공개되어 다시 풀 수 없습니다',not_released:'아직 결과가 공개되지 않았습니다',no_submission:'처음 낸 답안이 없습니다',nothing_to_retry:'다시 풀 문항이 없습니다'}[d?.error]||'내지 못했습니다. 새로고침 뒤 다시 시도해 주세요');
         T.results=await loadResults();T.view='result';
       }finally{RT.busy=false;render();window.scrollTo(0,0)}
       break}
-  }}catch(err){console.error(err);if(!/invalid_session|must_change_password|class_hidden/.test(err?.message||''))toast('문제가 생겼습니다. 잠시 뒤 다시 시도해 주세요.')}
+  }}catch(err){console.error(err);if(!errHandled(err))toast('문제가 생겼습니다. 잠시 뒤 다시 시도해 주세요.')}
 });

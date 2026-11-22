@@ -37,3 +37,11 @@ details.more .card{border:0;padding:0}
 .omr-row.flash{background:color-mix(in oklab,var(--bad) 12%,var(--paper));border-radius:6px}
 .hist-link{background:none;border:0;padding:0;text-align:left;cursor:pointer;color:var(--s1);text-decoration:underline;text-underline-offset:3px}
 @media (max-width:560px){.hist-tbl .hist-more{display:none}}
+/* 시험 목록 꼬리표: 정답·해설까지 공개된 시험(결과 공개와 구분) */
+.pill.key{color:var(--good);background:color-mix(in oklab,var(--good) 10%,var(--paper));font-weight:600}
+/* 시험 목록 맨 위 안내(응시가 닫혀 마지막 답안이 저장되지 않음): 닫기 단추를 누를 때까지 남는다 */
+.stu-notice{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;border-color:var(--bad);border-left:4px solid var(--bad);background:color-mix(in oklab,var(--bad) 6%,var(--paper))}
+.stu-notice p{margin:0;font-weight:600;color:var(--ink);line-height:1.5}
+.stu-notice .btn{flex:none}
+/* 응시 인원이 적어 반 평균을 숨겼다는 안내(한 화면에 한 번) */
+.cls-hidden{margin-top:8px}
