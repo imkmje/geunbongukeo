@@ -83,4 +83,52 @@ function parseEx(E,text){
   return {n,mismatch,cut};
 }
 
-if(typeof module!=='undefined'&&module.exports)module.exports={parseNat,parseEx,parseRanges,pwProblem,PW_MIN,EX_MAX};
+/* 반 명단 붙여넣기 계획: 저장하기 전에 무엇이 바뀌는지 보여 주려고 줄마다 분류한다.
+   text: 붙여넣은 글, cls: 이 반 이름, students: 지금 학생 [{uid,sid,name,cls}] (cls ''=반 없음)
+   돌려주는 값: add(새 학생) / move(다른 반·반 없음에서 옮겨 옴) / rename(이름만 바뀜) / same(그대로)
+               / errors(고쳐야 하는 줄, 줄 번호 포함) / skipped(학번이 없어 건너뛴 줄: 머리글 등) / missing(이 반인데 붙여넣은 글에 없는 학생) */
+function rosterPlan(text,cls,students){
+  const P={add:[],move:[],rename:[],same:[],errors:[],skipped:[],missing:[]};
+  const bySid={};for(const s of students||[])bySid[s.sid]=s;
+  const seen={};
+  String(text||'').replace(/^﻿/,'').split(/\r?\n/).forEach((raw,k)=>{
+    const line=raw.trim();const no=k+1;if(!line)return;
+    const short=line.length>40?line.slice(0,40)+'…':line;
+    const m=line.match(/(?:^|\D)(\d{5})(?!\d)/);
+    if(!m){
+      if(/(?:^|\D)\d{4}(?!\d)|(?:^|\D)\d{6,}/.test(line)&&/[가-힣]{2}/.test(line)&&!/\d{4}[-./]\d{1,2}[-./]\d{1,2}/.test(line))P.errors.push({line:no,text:short,msg:'학번은 숫자 5자리여야 합니다'});
+      else P.skipped.push({line:no,text:short});
+      return}
+    const sid=m[1];const after=line.slice(m.index+m[0].length);
+    const nm=after.match(/^[\s,\t|]*([가-힣]{2,10})(?![가-힣])/);
+    if(!nm){P.errors.push({line:no,text:short,msg:'학번 뒤에 이름(한글 2~10자)이 없습니다'});return}
+    if(seen[sid]){P.errors.push({line:no,text:short,msg:`학번 ${sid}이(가) ${seen[sid]}번째 줄에도 있습니다`});return}
+    seen[sid]=no;
+    const name=nm[1];const ex=bySid[sid];const row={line:no,sid,name};
+    if(!ex)P.add.push(row);
+    else if((ex.cls||'')!==cls)P.move.push({...row,uid:ex.uid,from:ex.cls||'',oldName:ex.name});
+    else if(ex.name!==name)P.rename.push({...row,uid:ex.uid,oldName:ex.name});
+    else P.same.push({...row,uid:ex.uid});
+  });
+  P.missing=(students||[]).filter(s=>(s.cls||'')===cls&&cls&&!seen[s.sid]);
+  P.changes=P.add.length+P.move.length+P.rename.length;
+  return P;
+}
+
+/* 반 숨기기: 화면에 보일 반 이름 목록. all=전체 반(만든 순서), hidden=숨긴 반 이름, show=숨긴 반도 보기 */
+function visibleClasses(all,hidden,show){const h=new Set(hidden||[]);return (all||[]).filter(c=>show||!h.has(c))}
+/* 학생 로그인 실패 코드 → 학생에게 보여 줄 말 */
+function loginErrorMsg(code){
+  return {locked:'여러 번 틀려서 10분 동안 잠겼습니다. 잠시 뒤 다시 시도해 주세요.',
+    class_hidden:'수업이 끝난 반이라 로그인할 수 없습니다. 선생님께 문의하세요.'}[code]
+    ||'학번 또는 비밀번호가 맞지 않습니다. 비밀번호를 잊었으면 선생님께 초기화를 부탁하세요.';
+}
+
+/* 시험 순서(교사 화면 전체): 시행일 → 제목(숫자는 숫자로: 2차시 < 10차시) → 만든 시각 */
+function testOrder(a,b){
+  return (a.date||'').localeCompare(b.date||'')
+    ||(a.title||'').localeCompare(b.title||'','ko',{numeric:true})
+    ||(a.created||'').localeCompare(b.created||'');
+}
+
+if(typeof module!=='undefined'&&module.exports)module.exports={testOrder,visibleClasses,loginErrorMsg,rosterPlan,parseNat,parseEx,parseRanges,pwProblem,PW_MIN,EX_MAX};

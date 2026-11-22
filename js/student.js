@@ -14,6 +14,7 @@ async function rpc(fn,args){
   const r=await sb.rpc(fn,args);
   if(r.error){
     if(/invalid_session/.test(r.error.message||'')){saveToken(null);T.me=null;T.mustChange=false;T.view='home';T.msg='로그인 시간이 지났습니다. 다시 로그인해 주세요.';render();throw r.error}
+    if(/class_hidden/.test(r.error.message||'')){saveToken(null);T.me=null;T.mustChange=false;T.view='home';T.msg=loginErrorMsg('class_hidden');render();throw r.error}
     if(/must_change_password/.test(r.error.message||'')){T.mustChange=true;T.pwMsg='';render();throw r.error}
     throw r.error;
   }
@@ -101,7 +102,7 @@ document.addEventListener('submit',async e=>{
   const r=await sb.rpc('student_login',{p_sid:$('#lgSid').value.trim(),p_password:$('#lgCode').value.trim()});
   if(r.error){msg.textContent='서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요.';return}
   const d=r.data||{};
-  if(!d.ok){msg.textContent=d.error==='locked'?'여러 번 틀려서 10분 동안 잠겼습니다. 잠시 뒤 다시 시도해 주세요.':'학번 또는 비밀번호가 맞지 않습니다. 비밀번호를 잊었으면 선생님께 초기화를 부탁하세요.';return}
+  if(!d.ok){msg.textContent=loginErrorMsg(d.error);return}
   saveToken(d.token,{sid:d.sid,name:d.name});T.msg='';T.pwMsg='';T.view='home';
   if(d.must_change){T.mustChange=true;render();return}
   try{await refreshHome();render()}catch(err){}
@@ -118,7 +119,7 @@ document.addEventListener('submit',async e=>{
     if(!d.ok){T.pwMsg={wrong_old:'지금 비밀번호가 맞지 않습니다.',too_short:`비밀번호는 ${PW_MIN}자 이상이어야 합니다.`,too_long:'비밀번호가 너무 깁니다. 조금 짧게 정해 주세요.',same_as_sid:'학번과 같은 비밀번호는 쓸 수 없습니다.'}[d.error]||'바꾸지 못했습니다. 다시 시도해 주세요.';msg.textContent=T.pwMsg;return}
     T.mustChange=false;T.pwMsg='';T.view='home';toast('새 비밀번호를 저장했습니다');
     await refreshHome();render();
-  }catch(err){if(!/invalid_session/.test(err?.message||''))msg.textContent='서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요.'}
+  }catch(err){if(!/invalid_session|class_hidden/.test(err?.message||''))msg.textContent='서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요.'}
 });
 document.addEventListener('click',async e=>{
   const b=e.target.closest('[data-act]');if(!b)return;const v=b.dataset.v;
@@ -133,7 +134,7 @@ document.addEventListener('click',async e=>{
     case 'result':T.cur=v;T.view='result';if(!T.results)render();T.results=await rpc('student_results',{p_token:T.token,p_test:null});render();break;
     case 'history':T.view='history';render();T.results=await rpc('student_results',{p_token:T.token,p_test:null});render();break;
     case 'logout':try{await sb.rpc('student_logout',{p_token:T.token})}catch(_){}saveToken(null);T.me=null;T.mustChange=false;T.results=null;T.msg='';T.view='home';render();break;
-  }}catch(err){console.error(err);if(!/invalid_session|must_change_password/.test(err?.message||''))toast('문제가 생겼습니다. 잠시 뒤 다시 시도해 주세요.')}
+  }}catch(err){console.error(err);if(!/invalid_session|must_change_password|class_hidden/.test(err?.message||''))toast('문제가 생겼습니다. 잠시 뒤 다시 시도해 주세요.')}
 });
 async function submit(){
   T.busy=true;render();

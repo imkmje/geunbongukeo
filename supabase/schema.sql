@@ -82,6 +82,9 @@ create table if not exists public.student_sessions (
 
 -- 예전 버전에서 만든 표에 새 칸 추가
 alter table public.students add column if not exists must_change_pw boolean not null default true;
+-- 반 숨기기: 수업이 끝난 반. 숨긴 반 학생은 로그인할 수 없지만 학생·답안·결과 기록은 그대로 남는다.
+alter table public.classes add column if not exists hidden boolean not null default false;
+alter table public.classes add column if not exists hidden_at timestamptz;
 
 create index if not exists submissions_student_idx on public.submissions(student_id);
 create index if not exists students_class_idx on public.students(class_id);
@@ -177,6 +180,10 @@ begin
   select st.* into s from public.student_sessions ss join public.students st on st.id = ss.student_id
    where ss.token = p_token and ss.expires_at > now();
   if not found then raise exception 'invalid_session' using errcode = '28000'; end if;
+  -- 숨긴 반 학생은 이미 로그인해 있어도 더 쓸 수 없다(반이 없는 학생은 예전처럼 로그인은 된다).
+  if exists (select 1 from public.classes c where c.id = s.class_id and c.hidden) then
+    raise exception 'class_hidden' using errcode = '28000';
+  end if;
   return s;
 end $$;
 
@@ -210,6 +217,10 @@ begin
   end if;
   if s.code_hash = crypt(trim(p_password), s.code_hash) then
     update public.students set fail_count = 0, locked_until = null where id = s.id;
+    -- 비밀번호가 맞아도 숨긴 반 학생이면 들어가지 못한다(비밀번호를 맞힌 뒤에만 알려 준다).
+    if exists (select 1 from public.classes c where c.id = s.class_id and c.hidden) then
+      return json_build_object('ok', false, 'error', 'class_hidden');
+    end if;
     delete from public.student_sessions where expires_at < now();
     insert into public.student_sessions(student_id) values (s.id) returning token into tok;
     return json_build_object('ok', true, 'token', tok, 'sid', s.sid, 'name', s.name, 'must_change', s.must_change_pw);
@@ -334,6 +345,23 @@ begin
   delete from public.student_sessions where student_id = s.id;
   return json_build_object('ok', true, 'sid', s.sid, 'name', s.name);
 end $$;
+-- 반 숨기기 / 다시 보이기. 숨기면 그 반 학생의 로그인을 모두 끊는다. 아무것도 지우지 않는다.
+create or replace function public.teacher_set_class_hidden(p_class uuid, p_hidden boolean)
+returns json language plpgsql volatile security definer
+set search_path = public
+as $$
+declare n int;
+begin
+  if not public.is_teacher() then raise exception 'not_teacher' using errcode = '42501'; end if;
+  update public.classes set hidden = p_hidden, hidden_at = case when p_hidden then now() else null end where id = p_class;
+  if not found then return json_build_object('ok', false, 'error', 'not_found'); end if;
+  if p_hidden then
+    delete from public.student_sessions ss using public.students st where st.id = ss.student_id and st.class_id = p_class;
+  end if;
+  select count(*) into n from public.students where class_id = p_class;
+  return json_build_object('ok', true, 'students', n);
+end $$;
+
 -- 무료 프로젝트 일시 정지 방지용(.github/workflows/keepalive.yml이 매일 부른다). 데이터는 읽지 않는다.
 create or replace function public.keepalive()
 returns timestamptz language sql stable
@@ -350,6 +378,7 @@ grant execute on function public.student_submit(uuid, uuid, text) to anon, authe
 grant execute on function public.student_results(uuid, uuid) to anon, authenticated;
 grant execute on function public.student_change_password(uuid, text, text) to anon, authenticated;
 grant execute on function public.teacher_reset_password(uuid) to authenticated;
+grant execute on function public.teacher_set_class_hidden(uuid, boolean) to authenticated;
 -- _session_student, _session_student_ready, _students_default_pw는 아무에게도 주지 않는다(안에서만 쓰임).
 
 -- ───────────────────────── 교사 등록 (따로 한 번 실행) ─────────────────────────

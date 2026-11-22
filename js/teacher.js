@@ -2,18 +2,23 @@
 /* ---------- 상태 ---------- */
 const S={
   ready:false, err:null, slow:false,
-  session:null, teacher:false, preview:false, idx:{classByName:{},studentBySid:{},studentById:{}}, pwCls:null,
+  session:null, teacher:false, preview:false, idx:{classByName:{},studentBySid:{},studentById:{}},
   live:{tests:{},keys:{},stats:{},subs:{},manual:{},config:{},roster:{}},
   demo:null, me:null,
   tab:'class', selTest:null, selStudent:null, sortBy:'no',
   edit:null, importText:'', importTest:null, importPreview:null,
-  stuTest:null, stuName:'', draft:{}, confirm:null, natText:'', cf:'', stuCls:'', tagText:'', impCls:'', rosterEdit:null, rosterText:'', rosterPv:null
+  stuTest:null, stuName:'', draft:{}, confirm:null, natText:'', cf:'', stuCls:'', tagText:'', impCls:'', mg:null
 };
 const D=()=>S.demo||S.live;
 
-const byDate=(a,b)=>(a.date||'').localeCompare(b.date||'')||(a.title||'').localeCompare(b.title||'');
+const byDate=testOrder;// js/logic.js: 시행일 → 제목(숫자 인식) → 만든 시각
 function testList(){return Object.entries(D().tests).map(([id,t])=>({id,...t})).sort(byDate)}
-function classes(){return D().config?.main?.classes||[]}
+function allClasses(){return D().config?.main?.classes||[]}
+function hiddenClasses(){return D().config?.main?.hidden||[]}
+const isHiddenCls=c=>!!c&&hiddenClasses().includes(c);
+/* 화면에 쓰는 반 목록: 숨긴 반은 '숨긴 반 보기'를 켰을 때만 */
+function classes(){return visibleClasses(allClasses(),hiddenClasses(),S.showHidden)}
+function liveClasses(){return allClasses().filter(c=>!isHiddenCls(c))}
 function effClasses(){const c=classes();return c.length?c:['']}
 const isOpen=(t,c)=>(t.openFor||[]).includes(c);
 const isRel=(t,c)=>(t.releasedFor||[]).includes(c);
@@ -32,16 +37,16 @@ function allRecords(){
   for(const [id,d] of Object.entries(D().manual))for(const [tid,v] of Object.entries(d.answers||{}))put(d.name,tid,v,v.src||'teacher','manual/'+id);
   return out;
 }
-function recordsFor(tid,c){if(c===undefined)c=S.cf;const all=allRecords();return Object.values(all).map(m=>m[tid]).filter(r=>r&&(!c||r.cls===c)).sort((a,b)=>a.name.localeCompare(b.name,'ko'))}
+function recordsFor(tid,c,every){if(c===undefined)c=S.cf;const all=allRecords();const hid=every||S.showHidden?null:new Set(hiddenClasses());return Object.values(all).map(m=>m[tid]).filter(r=>r&&(c?r.cls===c:!(hid&&hid.has(r.cls)))).sort((a,b)=>a.name.localeCompare(b.name,'ko'))}
 function keyOf(tid){return (D().keys[tid]?.a||'').split('')}
 function natOf(tid){return D().keys[tid]?.nat||null}
 function ident(n){const m=String(n).match(/\d{5}/);return m?m[0]:normName(n)}
 function rosterLists(){return D().roster?.main?.lists||{}}
 function rosterIndex(){const o={};for(const [c,l] of Object.entries(rosterLists()))for(const p of l)o[p.id]={...p,cls:c};return o}
-function parseRoster(text){const out=[],seen=new Set(),bad=[];for(const raw of text.split(/\n/)){const line=raw.trim();if(!line)continue;const m=line.match(/(?:^|\D)(\d{5})(?!\d)[\s,\t|]*([가-힣]{2,5})/);if(!m){if(/\d{5}/.test(line))bad.push(line.slice(0,20));continue}if(seen.has(m[1]))continue;seen.add(m[1]);out.push({id:m[1],name:m[2]})}return {out,bad,dup:[]}}
-function rosterEditor(c){const cur=rosterLists()[c]||[];const pv=S.rosterPv;return `<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px"><h3>${esc(c)} 명단</h3><p class="sub" style="margin-bottom:8px">수강생 목록 표를 통째로 복사해 붙여넣으면 학번(5자리)과 이름만 골라 읽습니다. 순번·신청시간 같은 다른 칸과 머리글 줄은 무시합니다. 저장하면 이 반의 명단이 붙여넣은 내용으로 바뀝니다. 새로 들어온 학생의 처음 비밀번호는 학번입니다.</p><textarea id="rosterText" rows="7" placeholder="1  10515  홍길동  2026-09-16 16:30:02&#10;2  10505  김하늘  2026-09-16 16:30:02">${esc(S.rosterText||cur.map(p=>p.id+' '+p.name).join('\n'))}</textarea><div class="row" style="margin-top:8px"><button class="btn" data-act="ros-parse">확인하기</button>${pv?`<button class="btn primary" data-act="ros-save" data-v="${esc(c)}" ${pv.out.length?'':'disabled'}>${pv.out.length}명으로 저장</button>`:''}<button class="btn ghost" data-act="ros-close">닫기</button></div>${pv?`<p class="sub" style="margin-top:8px">${pv.out.length}명 읽음${pv.dup.length?` · 다른 반 명단에도 있는 학번 ${pv.dup.length}개(${esc(pv.dup.join(', '))})`:''}${pv.bad.length?` · 읽지 못한 줄 ${pv.bad.length}개(${esc(pv.bad.slice(0,3).join(' / '))})`:''}</p>`:''}</div>`}
 function buildStats(tid){const t=D().tests[tid];const key=keyOf(tid);const all=toStats(analyze(t,key,recordsFor(tid,'')));const byClass={};for(const c of classes()){const rs=recordsFor(tid,c);if(rs.length)byClass[c]=toStats(analyze(t,key,rs))}const k=D().keys[tid]||{};return {all,byClass,nat:k.nat||null,ex:k.ex||null,tags:k.tags||null,at:Date.now()}}
-function clsBar(){return `<div class="chips" style="margin-bottom:14px" role="group" aria-label="반 선택"><span class="sub" style="align-self:center;margin-right:4px">반</span>${['',...classes()].map(c=>`<button class="chip" aria-pressed="${S.cf===c}" data-act="cf" data-v="${esc(c)}">${c?esc(c):'전체'}</button>`).join('')}</div>`}
+/* '숨긴 반 보기 (N)' 켜고 끄기. 숨긴 반이 없으면 아무것도 안 보인다. */
+function hidToggle(){const n=hiddenClasses().length;return n?`<button class="btn small ghost" data-act="hid-toggle" aria-pressed="${!!S.showHidden}">${S.showHidden?'숨긴 반 감추기':`숨긴 반 보기 (${n})`}</button>`:''}
+function clsBar(){return `<div class="chips" style="margin-bottom:14px;align-items:center" role="group" aria-label="반 선택"><span class="sub" style="align-self:center;margin-right:4px">반</span>${['',...classes()].map(c=>`<button class="chip${isHiddenCls(c)?' is-hidden':''}" aria-pressed="${S.cf===c}" data-act="cf" data-v="${esc(c)}">${c?esc(c):'전체'}${isHiddenCls(c)?' <span class="badge">숨김</span>':''}</button>`).join('')}${hidToggle()}</div>`}
 
 /* ---------- Supabase 연결 ---------- */
 const sb=window.supabase.createClient(window.GB_CONFIG.url,window.GB_CONFIG.key,{auth:{persistSession:true,autoRefreshToken:true}});
@@ -56,10 +61,10 @@ async function load(){
   cl.sort((a,b)=>(a.created_at||'').localeCompare(b.created_at||''));
   const cById={};const idx={classByName:{},studentBySid:{},studentById:{}};
   for(const c of cl){cById[c.id]=c.name;idx.classByName[c.name]=c.id}
-  const L={tests:{},keys:{},stats:{},subs:{},manual:{},config:{main:{classes:cl.map(c=>c.name)}},roster:{main:{lists:{}}}};
+  const L={tests:{},keys:{},stats:{},subs:{},manual:{},config:{main:{classes:cl.map(c=>c.name),hidden:cl.filter(c=>c.hidden).map(c=>c.name)}},roster:{main:{lists:{}}}};
   for(const x of st){idx.studentBySid[x.sid]=x;idx.studentById[x.id]=x;const cn=cById[x.class_id];if(cn)(L.roster.main.lists[cn]=L.roster.main.lists[cn]||[]).push({id:x.sid,name:x.name,uid:x.id,must:x.must_change_pw!==false,locked:!!x.locked_until&&Date.parse(x.locked_until)>Date.now()})}
   for(const l of Object.values(L.roster.main.lists))l.sort((a,b)=>a.id.localeCompare(b.id));
-  for(const t of ts)L.tests[t.id]={title:t.title,date:t.test_date||'',items:t.items||[],openFor:[],releasedFor:[],closedOnce:false,key:''};
+  for(const t of ts)L.tests[t.id]={title:t.title,date:t.test_date||'',created:t.created_at||'',items:t.items||[],openFor:[],releasedFor:[],closedOnce:false,key:''};
   for(const r of tc){const T=L.tests[r.test_id];const n=cById[r.class_id];if(!T||!n)continue;if(r.is_open)T.openFor.push(n);if(r.released)T.releasedFor.push(n);if(r.closed_once)T.closedOnce=true;
     if(r.stats){const X=L.stats[r.test_id]=L.stats[r.test_id]||{all:null,byClass:{},at:0};X.byClass[n]=r.stats;X.at=Math.max(X.at,Date.parse(r.released_at||0)||0)}}
   for(const k of tk)L.keys[k.test_id]={a:k.answers||'',nat:k.nat,ex:k.ex,tags:k.tags};
@@ -79,8 +84,6 @@ async function resetPw(uid){
   if(r.error||!r.data?.ok){toast('초기화하지 못했습니다: '+(r.error?.message||'명단에서 학생을 찾지 못했습니다'));return}
   await load();render();toast((st?st.sid+' '+st.name:'학생')+'의 비밀번호를 학번으로 되돌렸습니다');
 }
-/* 반 학생 비밀번호 상태와 초기화 버튼 */
-function pwSheet(c){const l=rosterLists()[c]||[];return `<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px"><h3>${esc(c)} 학생 비밀번호</h3><p class="sub" style="margin-bottom:8px">처음 비밀번호는 <b>학번</b>입니다. 학생은 처음 로그인하자마자 새 비밀번호(6자 이상, 학번과 다르게)를 정해야 시험을 볼 수 있습니다. 비밀번호를 잊은 학생은 <b>비밀번호 초기화</b>를 누르면 다시 학번으로 돌아가고, 잠금도 풀립니다.</p>${l.length?`<div class="tbl-wrap"><table><thead><tr><th>학번</th><th>이름</th><th>상태</th><th></th></tr></thead><tbody>${l.map(p=>{const cf=S.confirm==='pw:'+p.uid;return `<tr><td class="mono">${esc(p.id)}</td><td style="white-space:nowrap">${esc(p.name)}</td><td>${p.must?'<span class="pill closed">아직 학번 그대로</span>':'<span class="pill rel">직접 정함</span>'}${p.locked?' <span class="pill" style="color:var(--bad)">잠김</span>':''}</td><td>${cf?`<span class="confirm">${esc(p.name)} 학생의 비밀번호를 학번으로 되돌릴까요? <button class="btn small red" data-act="pw-reset-yes" data-v="${esc(p.uid)}">초기화</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:`<button class="btn small ghost" data-act="pw-reset" data-v="${esc(p.uid)}">비밀번호 초기화</button>`}</td></tr>`}).join('')}</tbody></table></div>`:'<p class="muted">명단에 학생이 없습니다.</p>'}<div class="row" style="margin-top:8px"><button class="btn ghost" data-act="pw-close">닫기</button></div></div>`}
 function viewLogin(){return `<div class="card" style="max-width:420px;margin:32px auto"><h2>교사 로그인</h2><form id="loginForm" class="stack" style="margin-top:14px"><label class="f">아이디 또는 이메일<input type="text" id="lgEmail" autocomplete="username" autocapitalize="off" spellcheck="false" required></label><label class="f">비밀번호<input type="password" id="lgPw" autocomplete="current-password" required></label><button class="btn primary" type="submit">로그인</button><p class="sub" id="lgMsg" role="status"></p></form><div class="row" style="margin-top:6px"><a class="btn ghost small" href="./">학생 화면으로</a></div></div>`}
 /* ---------- 렌더 스케줄 (입력 중에는 다시 그리지 않음) ---------- */
 let dirty=false;
@@ -89,7 +92,7 @@ function schedule(){if(busy()){dirty=true;return}render()}
 document.addEventListener('focusout',()=>setTimeout(()=>{if(dirty&&!busy()){dirty=false;render()}},50));
 
 /* ---------- 상단 탭 ---------- */
-const TABS=[['class','반 분석'],['student','학생 리포트'],['trend','누적 추이'],['manage','시험 관리']];
+const TABS=[['class','반 분석'],['student','학생 리포트'],['trend','누적 추이'],['manage','시험 관리'],['classes','반 관리']];
 function renderTabs(){
   const nav=$('#tabs');
   if(!(S.session&&S.teacher)&&!S.demo){nav.innerHTML='';return}
@@ -105,7 +108,7 @@ function render(){
   if(S.demo)html+=`<div class="demo-band" role="note"><span>예시 데이터를 보는 중입니다. 가상의 학생 26명이며 실제 기록이 아니고, 여기서 바꾼 내용은 저장되지 않습니다.</span><button class="btn small" data-act="demo-off">예시 끄기</button></div>`;
   if(!S.session&&!S.demo){app.innerHTML=viewLogin();return}
   if(!S.teacher&&!S.demo){app.innerHTML=`<div class="card empty"><h2>교사로 등록되지 않은 계정입니다</h2><p>Supabase SQL Editor에서 교사 등록 줄(insert into public.teachers …)을 이 계정의 이메일로 실행했는지 확인해 주세요.</p><button class="btn" data-act="logout">로그아웃</button></div>`;return}
-  {if(S.cf&&!classes().includes(S.cf))S.cf='';html+=(S.tab!=='manage'&&classes().length?clsBar():'')+({class:viewClass,student:viewStudentReport,trend:viewTrend,manage:viewManage}[S.tab])()}
+  {if(S.cf&&!classes().includes(S.cf))S.cf='';html+=(!['manage','classes'].includes(S.tab)&&allClasses().length?clsBar():'')+({class:viewClass,student:viewStudentReport,trend:viewTrend,manage:viewManage,classes:viewClasses}[S.tab]||viewClass)()}
   app.innerHTML=html;
   afterRender();
 }
@@ -133,7 +136,7 @@ function viewClass(){
       if(x.disc!=null&&x.disc<0)why.push(['warn','변별도 음수 · 정답 확인']);
       return {...x,why,nr}}).filter(x=>x.why.length).sort((a,b)=>b.why.length-a.why.length||a.rate-b.rate).slice(0,8);
   h+=`<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><h2>${esc(t.title)}</h2><p class="sub">${esc(t.date||'')} · 문항 ${t.items.length}개${hasElectives(t)?' · 선택과목 분리':''}</p></div>
-    <div class="row">${(()=>{const tg=S.cf?[S.cf]:effClasses();const lab=S.cf?S.cf+'에':(classes().length?'모든 반에':'학생에게');return tg.every(c=>isRel(t,c))?`<span class="pill rel">${S.cf?esc(S.cf)+' ':''}결과 공개됨</span><button class="btn small" data-act="unrelease" data-v="${t.id}">공개 취소</button>`:`<button class="btn red" data-act="release" data-v="${t.id}" ${keyMissing?'disabled title="정답을 모두 입력해야 공개할 수 있습니다"':''}>${esc(lab)} 결과 공개</button>`})()}</div></div>
+    <div class="row">${(()=>{const tg=S.cf?[S.cf]:(liveClasses().length?liveClasses():['']);const lab=S.cf?S.cf+'에':(classes().length?'모든 반에':'학생에게');return tg.every(c=>isRel(t,c))?`<span class="pill rel">${S.cf?esc(S.cf)+' ':''}결과 공개됨</span><button class="btn small" data-act="unrelease" data-v="${t.id}">공개 취소</button>`:`<button class="btn red" data-act="release" data-v="${t.id}" ${keyMissing?'disabled title="정답을 모두 입력해야 공개할 수 있습니다"':''}>${esc(lab)} 결과 공개</button>`})()}</div></div>
     ${classes().length&&(t.releasedFor||[]).length&&effClasses().some(c=>!isRel(t,c))?`<p class="note" style="margin-top:12px"><b>일부 반에만 공개되어 있습니다.</b> 화면에는 보이지 않지만, 아직 공개하지 않은 반 학생도 기술적으로는 정답을 찾아볼 수 있습니다. 같은 시험지를 쓰는 반이 모두 푼 뒤에 공개하는 편이 안전합니다.</p>`:''}
     ${keyMissing?`<p class="note" style="margin-top:12px"><b>정답이 비어 있는 문항이 있습니다.</b> 시험 관리에서 정답을 모두 입력해야 정답률이 맞게 계산됩니다.</p>`:''}
     ${(t.releasedFor||[]).length&&recs.some(r=>r.at>(D().stats[t.id]?.at||0))?`<p class="note" style="margin-top:12px"><b>공개한 뒤에 새 답안이 들어왔습니다.</b> 학생 화면의 반 정답률을 갱신하려면 <button class="btn small" data-act="release" data-v="${t.id}">공개 자료 갱신</button></p>`:''}
@@ -234,10 +237,10 @@ function viewManage(){
   const ts=testList();
   let h=`<div class="stack"><div class="card"><div class="row" style="justify-content:space-between"><div><h2>시험 회차</h2><p class="sub">회차를 만들고 정답을 넣은 뒤 응시를 열면, 학생 화면에 답안지가 나타납니다.</p></div><div class="row"><button class="btn primary" data-act="new-test">새 시험 만들기</button>${S.demo?'':'<button class="btn" data-act="demo-on">예시 데이터로 둘러보기</button>'}</div></div>`;
   if(!ts.length)h+=`<p class="note" style="margin-top:14px">아직 시험이 없습니다. <b>새 시험 만들기</b>를 누르면 45문항 틀이 미리 채워집니다. 영역 구분은 실제 시험지를 보고 맞춰 주세요.</p>`;
-  else h+=`<div class="tbl-wrap" style="margin-top:14px"><table><thead><tr><th>시험</th><th>상태</th><th class="n">답안</th><th>정답</th><th>전국 자료</th><th></th></tr></thead><tbody>${ts.map(t=>{const [c,l]=statusOf(t);const k=keyOf(t.id);const filled=t.items.filter((_,i)=>k[i]&&k[i]!=='0').length;const nat=natOf(t.id);const cf=S.confirm==='del:'+t.id;return `<tr><td><b>${esc(t.title)}</b><br><span class="muted">${esc(t.date||'')}</span></td><td>${classes().length?classes().map(cc=>{const [c2,l2]=statusOf(t,cc);return `<div><span class="pill ${c2}">${esc(cc)} ${l2}</span></div>`}).join(''):`<span class="pill ${c}">${l}</span>`}</td><td class="n">${recordsFor(t.id,'').length}</td><td class="num">${filled}/${t.items.length}</td><td>${nat&&nat.some(Boolean)?'있음':'<span class="muted">없음</span>'}</td><td><div class="row" style="gap:6px">${effClasses().map(c=>isOpen(t,c)?`<button class="btn small" data-act="close" data-v="${t.id}|${esc(c)}">${c?esc(c)+' ':''}응시 닫기</button>`:`<button class="btn small" data-act="open" data-v="${t.id}|${esc(c)}">${c?esc(c)+' ':''}응시 열기</button>`).join('')}<button class="btn small" data-act="edit" data-v="${t.id}">편집</button>${cf?`<span class="confirm">이 시험에 낸 답안 기록도 함께 지워집니다 <button class="btn small red" data-act="del-yes" data-v="${t.id}">삭제</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:`<button class="btn small ghost" data-act="del" data-v="${t.id}">삭제</button>`}</div></td></tr>`}).join('')}</tbody></table></div>`;
+  else h+=`<div class="tbl-wrap" style="margin-top:14px"><table><thead><tr><th>시험</th><th>상태</th><th class="n">답안</th><th>정답</th><th>전국 자료</th><th></th></tr></thead><tbody>${ts.map(t=>{const [c,l]=statusOf(t);const k=keyOf(t.id);const filled=t.items.filter((_,i)=>k[i]&&k[i]!=='0').length;const nat=natOf(t.id);const cf=S.confirm==='del:'+t.id;return `<tr><td><b>${esc(t.title)}</b><br><span class="muted">${esc(t.date||'')}</span></td><td>${classes().length?classes().map(cc=>{const [c2,l2]=statusOf(t,cc);return `<div><span class="pill ${c2}">${esc(cc)} ${l2}</span></div>`}).join(''):`<span class="pill ${c}">${l}</span>`}</td><td class="n">${recordsFor(t.id,'').length}</td><td class="num">${filled}/${t.items.length}</td><td>${nat&&nat.some(Boolean)?'있음':'<span class="muted">없음</span>'}</td><td><div class="row" style="gap:6px">${effClasses().map(c=>isHiddenCls(c)?`<span class="badge">${esc(c)} 숨김</span>`:isOpen(t,c)?`<button class="btn small" data-act="close" data-v="${t.id}|${esc(c)}">${c?esc(c)+' ':''}응시 닫기</button>`:`<button class="btn small" data-act="open" data-v="${t.id}|${esc(c)}">${c?esc(c)+' ':''}응시 열기</button>`).join('')}<button class="btn small" data-act="edit" data-v="${t.id}">편집</button>${cf?`<span class="confirm">이 시험에 낸 답안 기록도 함께 지워집니다 <button class="btn small red" data-act="del-yes" data-v="${t.id}">삭제</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:`<button class="btn small ghost" data-act="del" data-v="${t.id}">삭제</button>`}</div></td></tr>`}).join('')}</tbody></table></div>`;
   h+='</div>';
   {const x={...SITE_DEFAULT,...(S.site||{})};h+=`<div class="card"><h3>사이트 제목</h3><p class="sub" style="margin-bottom:10px">학생 화면과 교사 화면 맨 위에 보이는 제목과 그 위의 작은 설명 줄입니다.</p><div class="row" style="align-items:flex-end"><label class="f" style="flex:1;min-width:160px">제목<input type="text" id="siteTitle" maxlength="40" value="${esc(x.title)}"></label><label class="f" style="flex:2;min-width:200px">학생 화면 설명 줄<input type="text" id="siteStu" maxlength="60" value="${esc(x.student_subtitle)}"></label><label class="f" style="flex:2;min-width:200px">교사 화면 설명 줄<input type="text" id="siteTch" maxlength="60" value="${esc(x.teacher_subtitle)}"></label><button class="btn primary" data-act="site-save">제목 저장</button></div></div>`}
-  {const cl=classes();h+=`<div class="card"><h3>반 관리</h3><p class="sub" style="margin-bottom:10px">방과후 반을 만들면 반마다 응시를 열고 결과를 따로 공개하며, 분석도 반별로 볼 수 있습니다. 학생은 학번과 비밀번호로 로그인하면 자기 반의 시험만 봅니다(처음 비밀번호는 학번).</p><div class="row">${cl.map(c=>S.confirm==='cls:'+c?`<span class="confirm">${esc(c)} 삭제(답안 기록은 남음) <button class="btn small red" data-act="cls-del-yes" data-v="${esc(c)}">삭제</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:`<span class="chip" style="cursor:default">${esc(c)} · ${(rosterLists()[c]||[]).length}명 ${(()=>{const l=rosterLists()[c]||[];const m=l.filter(p=>p.locked).length;return m?`<span class="pill" style="color:var(--bad)">잠김 ${m}</span> `:''})()}<button class="btn small ghost" data-act="ros-edit" data-v="${esc(c)}">명단</button><button class="btn small ghost" data-act="pw-open" data-v="${esc(c)}">비밀번호</button><button class="btn small ghost" data-act="cls-del" data-v="${esc(c)}" aria-label="${esc(c)} 삭제">×</button></span>`).join('')}<input type="text" id="newCls" placeholder="예: 화목반" style="width:140px" aria-label="새 반 이름"><button class="btn small" data-act="cls-add">반 추가</button></div>${S.rosterEdit&&cl.includes(S.rosterEdit)?rosterEditor(S.rosterEdit):''}${S.pwCls&&cl.includes(S.pwCls)?pwSheet(S.pwCls):''}</div>`}
+  h+=`<p class="note">반 만들기, 학생 명단, 비밀번호 초기화는 위쪽 <button class="btn small" data-act="tab" data-v="classes">반 관리</button> 탭으로 옮겼습니다.</p>`;
   if(ts.length){
     if(!S.importTest||!D().tests[S.importTest])S.importTest=ts[ts.length-1].id;
     const it=D().tests[S.importTest];
@@ -289,9 +292,9 @@ document.addEventListener('click',async e=>{
     case 'demo-on':if(!(S.session&&S.teacher))break;S.demo=makeDemo();S.selTest=null;render();break;
     case 'demo-off':S.demo=null;S.selTest=null;S.edit=null;render();break;
     case 'copy-fb':copy($('#fbText').value,$('#fbText'));break;
-    case 'release':{const t=D().tests[v];const key=keyOf(v);const tg=S.cf?[S.cf]:classes();if(!tg.length){toast('반을 먼저 만들어 주세요');break}await api(async()=>{for(const c of tg){const rs=recordsFor(v,c);const stats=rs.length?toStats(analyze(t,key,rs)):null;chk(await sb.from('test_class').upsert({test_id:v,class_id:clsId(c),released:true,released_at:nowIso(),stats},{onConflict:'test_id,class_id'}))}},(S.cf?S.cf+'에 ':'')+'결과를 공개했습니다');break}
-    case 'unrelease':{const tg=S.cf?[S.cf]:classes();await api(async()=>{for(const c of tg)chk(await sb.from('test_class').update({released:false,released_at:null,stats:null}).eq('test_id',v).eq('class_id',clsId(c)))},'공개를 취소했습니다');break}
-    case 'open':{const [id,c]=v.split('|');if(!c){toast('반을 먼저 만들어 주세요');break}await api(async()=>chk(await sb.from('test_class').upsert({test_id:id,class_id:clsId(c),is_open:true},{onConflict:'test_id,class_id'})),c+' 응시를 열었습니다');break}
+    case 'release':{const t=D().tests[v];const key=keyOf(v);const tg=S.cf?[S.cf]:liveClasses();if(!tg.length){toast('반을 먼저 만들어 주세요');break}await api(async()=>{for(const c of tg){const rs=recordsFor(v,c);const stats=rs.length?toStats(analyze(t,key,rs)):null;chk(await sb.from('test_class').upsert({test_id:v,class_id:clsId(c),released:true,released_at:nowIso(),stats},{onConflict:'test_id,class_id'}))}},(S.cf?S.cf+'에 ':'')+'결과를 공개했습니다');break}
+    case 'unrelease':{const tg=S.cf?[S.cf]:liveClasses();await api(async()=>{for(const c of tg)chk(await sb.from('test_class').update({released:false,released_at:null,stats:null}).eq('test_id',v).eq('class_id',clsId(c)))},'공개를 취소했습니다');break}
+    case 'open':{const [id,c]=v.split('|');if(!c){toast('반을 먼저 만들어 주세요');break}if(isHiddenCls(c)){toast('숨긴 반에는 응시를 열 수 없습니다. 반 관리에서 다시 보이게 해 주세요');break}await api(async()=>chk(await sb.from('test_class').upsert({test_id:id,class_id:clsId(c),is_open:true},{onConflict:'test_id,class_id'})),c+' 응시를 열었습니다');break}
     case 'close':{const [id,c]=v.split('|');await api(async()=>chk(await sb.from('test_class').update({is_open:false,closed_once:true}).eq('test_id',id).eq('class_id',clsId(c))),c+' 응시를 닫았습니다');break}
     case 'del':S.confirm='del:'+v;render();break;
     case 'del-yes':S.confirm=null;await api(async()=>chk(await sb.from('tests').delete().eq('id',v)),'시험과 그 답안을 지웠습니다');break;
@@ -312,21 +315,11 @@ document.addEventListener('click',async e=>{
     case 'ex-clear':S.edit.ex=[];render();break;
     case 'tag-apply':{S.tagText=$('#tagText').value;const n=parseTags(S.edit,S.tagText);render();toast(n+'문항에 꼬리표를 넣었습니다');break}
     case 'tag-clear':S.edit.tags=[];render();break;
+    case 'hid-toggle':S.showHidden=!S.showHidden;lsSet('gb-show-hidden',S.showHidden);render();break;
     case 'cf':S.cf=v;lsSet('omr-cf',v);S.selStudent=null;render();break;
-    case 'cls-add':{const n=normName($('#newCls').value);if(!n)break;if(classes().includes(n)){toast('이미 있는 반입니다');break}await api(async()=>chk(await sb.from('classes').insert({name:n})),n+' 반을 추가했습니다');break}
-    case 'cls-del':S.confirm='cls:'+v;render();break;
-    case 'cls-del-yes':S.confirm=null;await api(async()=>chk(await sb.from('classes').delete().eq('id',clsId(v))),'반을 지웠습니다(학생과 답안 기록은 남습니다)');break;
-    case 'pw-open':S.pwCls=v;S.rosterEdit=null;S.confirm=null;render();break;
-    case 'pw-close':S.pwCls=null;S.confirm=null;render();break;
-    case 'pw-reset':S.confirm='pw:'+v;render();break;
-    case 'pw-reset-yes':S.confirm=null;await resetPw(v);break;
     case 'site-save':{const v2={title:normName($('#siteTitle').value),student_subtitle:normName($('#siteStu').value),teacher_subtitle:normName($('#siteTch').value)};if(!v2.title){toast('제목을 적어 주세요');break}await api(async()=>chk(await sb.from('site_settings').update({...v2,updated_at:nowIso()}).eq('id',1).select()).length||(()=>{throw new Error('설정 표가 없습니다. Supabase에서 최신 schema.sql을 다시 실행해 주세요')})(),'제목을 저장했습니다');break}
     case 'reload':S.ready=false;render();try{await load()}catch(e){toast('불러오지 못했습니다: '+(e?.message||e))}S.ready=true;render();break;
     case 'logout':await sb.auth.signOut();S.session=null;S.teacher=false;S.live={tests:{},keys:{},stats:{},subs:{},manual:{},config:{},roster:{}};render();break;
-    case 'ros-edit':S.rosterEdit=v;S.pwCls=null;S.rosterText='';S.rosterPv=null;render();break;
-    case 'ros-close':S.rosterEdit=null;S.rosterPv=null;S.rosterText='';render();break;
-    case 'ros-parse':{S.rosterText=$('#rosterText').value;const p=parseRoster(S.rosterText);const ri=rosterIndex();p.dup=p.out.filter(x=>ri[x.id]&&ri[x.id].cls!==S.rosterEdit).map(x=>x.id);S.rosterPv=p;render();break}
-    case 'ros-save':{const p=S.rosterPv;if(!p)break;const cid=clsId(v);const ok=await api(async()=>{chk(await sb.from('students').upsert(p.out.map(x=>({sid:x.id,name:x.name,class_id:cid})),{onConflict:'sid'}));const keep=new Set(p.out.map(x=>x.id));const gone=Object.values(S.idx.studentById).filter(x=>x.class_id===cid&&!keep.has(x.sid)).map(x=>x.id);if(gone.length)chk(await sb.from('students').update({class_id:null}).in('id',gone))},v+' 명단을 저장했습니다('+p.out.length+'명)');if(ok){S.rosterPv=null;S.rosterText='';S.rosterEdit=null;render()}break}
     case 'edit-save':await saveEdit();break;
     case 'imp-parse':S.importText=$('#impText').value;S.importPreview=parseImport(S.importText,S.importTest);render();break;
     case 'imp-save':await saveImport();break;
@@ -344,7 +337,6 @@ document.addEventListener('input',e=>{
   if(el.id==='natText')S.natText=el.value;
   if(el.id==='exText')S.exText=el.value;
   if(el.id==='tagText')S.tagText=el.value;
-  if(el.id==='rosterText'){S.rosterText=el.value;S.rosterPv=null}
   if(S.edit){if(el.id==='edTitle')S.edit.title=el.value;if(el.id==='edDate')S.edit.date=el.value;const tr=el.closest('tr[data-i]');if(tr&&el.dataset.f&&el.tagName==='INPUT')S.edit.items[+tr.dataset.i][el.dataset.f]=el.value}
 });
 function afterRender(){}
@@ -357,7 +349,7 @@ async function saveEdit(){
   const nat=E.nat.some(Boolean)?items.map((_,i)=>E.nat[i]||null):null;
   const ex=E.ex.some(Boolean)?items.map((_,i)=>E.ex[i]||null):null;
   const tags=E.tags.some(Boolean)?items.map((_,i)=>E.tags[i]||null):null;
-  if(E.id&&recordsFor(E.id,'').length&&D().tests[E.id]?.items?.length!==items.length&&!confirmItems){S.confirm='items:'+E.id;toast('답안이 있는 시험의 문항 수가 바뀝니다. 저장을 한 번 더 누르면 진행합니다');confirmItems=true;return}
+  if(E.id&&recordsFor(E.id,'',true).length&&D().tests[E.id]?.items?.length!==items.length&&!confirmItems){S.confirm='items:'+E.id;toast('답안이 있는 시험의 문항 수가 바뀝니다. 저장을 한 번 더 누르면 진행합니다');confirmItems=true;return}
   confirmItems=false;
   const ok=await api(async()=>{
     chk(await sb.from('tests').upsert({id,title:E.title.trim(),test_date:E.date||null,items,updated_at:nowIso()}));
@@ -437,7 +429,7 @@ async function afterLogin(session){
   S.ready=true;render();
 }
 (async function boot(){
-  S.cf=lsGet('omr-cf','')||'';
+  S.cf=lsGet('omr-cf','')||'';S.showHidden=!!lsGet('gb-show-hidden',false);
   loadSite(sb,'teacher').then(x=>{S.site=x});
   const {data}=await sb.auth.getSession();
   if(data.session)await afterLogin(data.session);else{S.ready=true;render()}

@@ -144,7 +144,53 @@ details.ex{margin-top:6px;font-size:13.5px}
 details.ex summary{cursor:pointer;color:var(--s1);font-weight:500}
 details.ex div{white-space:pre-line;background:var(--bg);border-radius:6px;padding:8px 10px;margin-top:6px;line-height:1.65;max-width:72ch}
 @media (max-width:560px){.brand h1{font-size:22px}.dist{width:130px}.focus-item{grid-template-columns:44px 1fr}.focus-item>:last-child{grid-column:2}}
+/* 반 관리 탭 */
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.badge{display:inline-flex;align-items:center;font-size:12px;line-height:1.4;padding:2px 8px;border-radius:999px;font-weight:600;white-space:nowrap;background:var(--bg);color:var(--ink2);border:1px solid var(--line2)}
+.badge.good{color:var(--good);border-color:color-mix(in oklab,var(--good) 45%,transparent);background:color-mix(in oklab,var(--good) 9%,var(--paper))}
+.badge.warn{color:var(--warn);border-color:color-mix(in oklab,var(--warn) 45%,transparent);background:color-mix(in oklab,var(--warn) 9%,var(--paper))}
+.badge.bad{color:var(--bad);border-color:color-mix(in oklab,var(--bad) 45%,transparent);background:color-mix(in oklab,var(--bad) 9%,var(--paper))}
+.btn.danger{color:var(--bad)}
+.mg-picker{align-items:center}
+.mg-picker .chip{font-weight:600}
+.mg-picker .cnt{font-weight:400;opacity:.75;margin-left:2px}
+.mg-picker .muted-chip{border-style:dashed}
+.chip.is-hidden{border-style:dashed;color:var(--muted)}
+.chip.is-hidden[aria-pressed="true"]{color:var(--paper)}
+.mg-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:14px}
+.mg-tile{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;border:1px solid var(--line);border-left:4px solid var(--line2);background:var(--paper);border-radius:8px;padding:8px 12px;cursor:pointer;min-width:0}
+.mg-tile .k{font-size:12.5px;color:var(--ink2)}
+.mg-tile .v{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
+.mg-tile .v small{font-size:12.5px;font-weight:500;color:var(--muted);margin-left:2px}
+.mg-tile.good{border-left-color:var(--good)} .mg-tile.warn{border-left-color:var(--warn)} .mg-tile.bad{border-left-color:var(--bad)}
+.mg-tile:hover{border-color:var(--ink2)}
+.mg-tile[aria-pressed="true"]{background:var(--omr-soft);border-color:var(--omr)}
+.mg-panel{margin-top:14px;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:14px}
+.mg-panel textarea{background:var(--paper)}
+.mg-errs{margin-top:10px;border:1px solid var(--bad);border-radius:8px;padding:10px 12px;background:color-mix(in oklab,var(--bad) 7%,var(--paper));font-size:13.5px}
+.mg-errs ul{margin:6px 0 0;padding-left:18px} .mg-errs li{margin:2px 0;word-break:break-all}
+.mg-check{display:block;margin-top:12px;font-size:14px;cursor:pointer}
+.mg-check input{margin-right:6px;vertical-align:-2px}
+.mg-table .acts-in{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;align-items:center}
+.mg-table td.nm{white-space:nowrap;font-weight:500}
+.mg-table select{padding:3px 6px;font-size:13px}
+input[type=search]{border:1px solid var(--line2);background:var(--paper);border-radius:7px;padding:7px 10px;min-width:0;width:100%}
+dialog.dlg{border:1px solid var(--line2);border-radius:12px;padding:20px;max-width:min(440px,calc(100% - 32px));background:var(--paper);color:var(--ink)}
+dialog.dlg::backdrop{background:rgba(0,0,0,.45)}
+dialog.dlg h2{font-size:18px} dialog.dlg p{margin:8px 0 18px;line-height:1.6}
+@media (max-width:640px){
+  .mg-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .mg-wrap{border:0;overflow:visible}
+  .mg-table thead{display:none}
+  .mg-table,.mg-table tbody{display:block}
+  .mg-table tr{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px}
+  .mg-table tr[hidden]{display:none}
+  .mg-table td{border:0;padding:0}
+  .mg-table td[data-l="비밀번호"]{grid-column:1/-1}
+  .mg-table td.acts{grid-column:1/-1;padding-top:6px;border-top:1px dashed var(--line)}
+  .mg-table .acts-in{justify-content:flex-start}
+}
 /* 휴대폰: 입력 칸 글자가 16px보다 작으면 iOS가 화면을 확대하므로 키우고, OMR 동그라미는 손가락으로 누르기 쉽게 키운다 */
-@media (max-width:560px){input[type=text],input[type=password],input[type=date],input[type=number],select,textarea{font-size:16px}}
+@media (max-width:560px){input[type=search],input[type=text],input[type=password],input[type=date],input[type=number],select,textarea{font-size:16px}}
 @media (pointer:coarse){.omr-cols{grid-template-columns:repeat(auto-fill,minmax(min(270px,100%),1fr))}.omr-row{grid-template-columns:34px repeat(5,minmax(0,40px));gap:6px}.omr .bub{width:min(36px,100%);height:36px;border-radius:18px;font-size:13px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
