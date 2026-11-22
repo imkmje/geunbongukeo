@@ -138,3 +138,44 @@ test('실제 차시 파일: 15쌍 짝짓기, 제목이 등록된 제목과 같�
     if(/^# 유형:/m.test(fs.readFileSync(path.join(DIR,p.stat),'utf8')))assert.equal(e.typeN,e.items.length,p.n+'차시 유형');
   }
 });
+
+/* ---------- 교사 화면 쓰기 편하게 (시험 칩·기본 시험·정답 미리 보기·그래프 축) ---------- */
+test('해설 화면: 지문 세트가 없는 문항은 영역별로 따로 묶는다(언어(1번))',()=>{
+  const b=T.liveBoard({items},key,[{a:'3152'},{a:'4152'}]);
+  assert.deepEqual(b.loose.map(s=>[s.name,s.nos.join(','),s.wrongRate]),[['언어','1',0.5]]);
+  assert.ok(!b.sets.some(s=>s.name==='언어'),'세트 목록에는 섞지 않는다');
+});
+
+test('시험 칩: 고른 반에서 열었거나 공개했거나 답안이 있는 시험만 위에, 나머지는 접는다',()=>{
+  const ts=[{id:'a',openFor:[],releasedFor:['A반']},{id:'b',openFor:['B반'],releasedFor:[]},{id:'c',openFor:[],releasedFor:[]},{id:'d',openFor:[],releasedFor:[]}];
+  const r=T.splitTestChips(ts,['A반'],t=>t.id==='d');
+  assert.deepEqual(r.main.map(t=>t.id),['a','d']);assert.deepEqual(r.more.map(t=>t.id),['b','c'],'다른 반에만 열린 시험은 접힌다');
+  const all=T.splitTestChips(ts,['A반','B반'],()=>false);
+  assert.deepEqual(all.main.map(t=>t.id),['a','b']);assert.deepEqual(all.more.map(t=>t.id),['c','d']);
+  assert.deepEqual(T.splitTestChips([],['A반']),{main:[],more:[]});
+});
+
+test('기본 시험: 응시 중 → 최근 공개·제출 → 목록 마지막',()=>{
+  const r=(id,o={})=>({id,open:false,relAt:0,lastAt:0,...o});
+  assert.equal(T.pickDefaultTest([r('1차',{relAt:100}),r('2차',{open:true}),r('3차')]),'2차','응시 중인 시험이 먼저');
+  assert.equal(T.pickDefaultTest([r('1차',{relAt:300}),r('2차',{lastAt:200}),r('15차')]),'1차','준비 중인 마지막 시험이 아니라 가장 최근 활동');
+  assert.equal(T.pickDefaultTest([r('1차',{relAt:100}),r('2차',{relAt:50,lastAt:400})]),'2차','답안이 늦게 들어온 시험');
+  assert.equal(T.pickDefaultTest([r('1차',{open:true,lastAt:500}),r('2차',{open:true,lastAt:100})]),'1차','둘 다 응시 중이면 최근 제출');
+  assert.equal(T.pickDefaultTest([r('1차'),r('2차')]),'2차','활동이 없으면 목록 마지막');
+  assert.equal(T.pickDefaultTest([]),null);
+});
+
+test('정답 미리 보기: 5개씩 띄어 쓰고, 풀어 쓴 글은 번호와 함께',()=>{
+  assert.equal(T.groupKey('5254234515'),'52542 34515');
+  assert.equal(T.groupKey('525423'),'52542 3');assert.equal(T.groupKey(''),'');
+  assert.equal(T.keyTip('520'),'1번 5, 2번 2, 3번 ?');
+  assert.equal(T.keyTip('52',[{no:'11'},{no:'12'}]),'11번 5, 12번 2');
+});
+
+test('그래프 가로축: 제목에서 N차시만',()=>{
+  const {sessionLabel}=require('../js/logic.js');
+  assert.equal(sessionLabel('근본국어 3차시 · 독서(사회) · 문학(현대시) · 문법'),'3차시');
+  assert.equal(sessionLabel('근본국어 03 차시'),'3차시');
+  assert.equal(sessionLabel('6월 학력평가 (예시)'),'6월 학력평가 (…');
+  assert.equal(sessionLabel('짧은 제목'),'짧은 제목');assert.equal(sessionLabel(null),'');
+});

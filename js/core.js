@@ -126,7 +126,9 @@ function lineChart(labels,series,{h=230,max=1,legend=true}={}){
   const W=640,H=h,L=40,R=110,T=16,B=34,pw=W-L-R,ph=H-T-B;
   const x=i=>L+(labels.length===1?pw/2:pw*i/(labels.length-1)),y=v=>T+ph*(1-v/max);
   let g='';for(const t of [0,.25,.5,.75,1]){g+=`<line x1="${L}" x2="${L+pw}" y1="${y(t*max)}" y2="${y(t*max)}" stroke="var(--line)" stroke-width="1"/><text x="${L-8}" y="${y(t*max)+4}" text-anchor="end" font-size="12">${Math.round(t*max*100)}</text>`}
-  labels.forEach((lb,i)=>{g+=`<text x="${x(i)}" y="${H-10}" text-anchor="middle" font-size="12">${esc(lb.length>9?lb.slice(0,9)+'…':lb)}</text>`});
+  // 가로축: 'N차시'만(js/logic.js sessionLabel), 전체 제목은 마우스를 올리거나 누르면(<title>·data-tip)
+  const shortLb=lb=>typeof sessionLabel==='function'?sessionLabel(lb):(lb.length>9?lb.slice(0,9)+'…':lb);
+  labels.forEach((lb,i)=>{g+=`<text x="${x(i)}" y="${H-10}" text-anchor="middle" font-size="12" tabindex="0" data-tip="${esc(lb)}"><title>${esc(lb)}</title>${esc(shortLb(String(lb)))}</text>`});
   const ends=[];
   for(const s of series){
     const pts=s.values.map((v,i)=>v==null?null:[x(i),y(v),v,i]).filter(Boolean);if(!pts.length)continue;
@@ -138,6 +140,15 @@ function lineChart(labels,series,{h=230,max=1,legend=true}={}){
   for(const e of ends)g+=`<text x="${L+pw+10}" y="${e.y+4}" font-size="12.5" style="fill:var(--ink)">${esc(e.name)} ${Math.round(e.v*100)}</text>`;
   const lg=legend&&series.length>1?`<div class="legend">${series.map(s=>`<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join('')}</div>`:'';
   return `${lg}<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="회차별 추이 그래프">${g}</svg>`;
+}
+/* 어려운 문항(전국 비교) 추이: 전국 자료가 있는 회차가 2개보다 적으면 선 대신 한 문장으로 보여 준다.
+   series 중 이름이 '전국'인 것을 기준으로 센다. 교사·학생 화면이 함께 쓸 수 있다. */
+function natTrendChart(labels,series,opt){
+  const nat=series.find(s=>s.name==='전국');const idx=nat?nat.values.map((v,i)=>v!=null?i:-1).filter(i=>i>=0):[];
+  if(idx.length>=2||!nat)return lineChart(labels,series,opt);
+  if(!idx.length)return '<p class="muted">전국 자료가 있는 회차가 쌓이면 선이 그려집니다.</p>';
+  const i=idx[0];const vals=series.filter(s=>s.values[i]!=null).map(s=>`${s.name} ${Math.round(s.values[i]*100)}%`).join(' · ');
+  return `<p class="note">전국 자료가 있는 회차가 쌓이면 선이 그려집니다. (지금 1회차: ${esc(vals)})</p>`;
 }
 function barRows(rows,{a='반',b=null}={}){
   if(!rows.length)return '<p class="muted">데이터가 없습니다.</p>';

@@ -22,6 +22,16 @@ function liveClasses(){return allClasses().filter(c=>!isHiddenCls(c))}
 function effClasses(){const c=classes();return c.length?c:['']}
 const isOpen=(t,c)=>(t.openFor||[]).includes(c);
 const isRel=(t,c)=>(t.releasedFor||[]).includes(c);
+/* 개인정보 정리(익명화)를 마친 반 */
+const isAnonCls=c=>!!c&&(D().config?.main?.anon||[]).includes(c);
+/* 지금 고른 반(들): 반 칩에서 고른 반, '전체'면 보이는 모든 반 */
+function scopeClasses(){return S.cf?[S.cf]:effClasses()}
+/* 기본으로 고를 시험 id (js/tools-logic.js pickDefaultTest): 응시 중 → 최근 공개·제출 → 목록 마지막 */
+function defaultTestId(cs){
+  cs=cs||scopeClasses();const all=allRecords();
+  const last=tid=>{let m=0;for(const per of Object.values(all)){const r=per[tid];if(r&&(!cs.length||cs.includes(r.cls)||cs.includes('')))m=Math.max(m,r.at||0)}return m};
+  return pickDefaultTest(testList().map(t=>({id:t.id,open:cs.some(c=>isOpen(t,c)),relAt:t.relAt||0,lastAt:last(t.id)})));
+}
 function myCls(){return classes().length?S.stuCls:''}
 function statusOf(t,c){if(c===undefined)c=(S.teacher||S.demo)&&!S.preview?S.cf:myCls();const cs=c?[c]:effClasses();
   const rel=cs.filter(x=>isRel(t,x)).length,op=cs.filter(x=>isOpen(t,x)).length;
@@ -61,11 +71,11 @@ async function load(){
   cl.sort((a,b)=>(a.created_at||'').localeCompare(b.created_at||''));
   const cById={};const idx={classByName:{},studentBySid:{},studentById:{}};
   for(const c of cl){cById[c.id]=c.name;idx.classByName[c.name]=c.id}
-  const L={tests:{},keys:{},stats:{},subs:{},manual:{},config:{main:{classes:cl.map(c=>c.name),hidden:cl.filter(c=>c.hidden).map(c=>c.name)}},roster:{main:{lists:{}}}};
+  const L={tests:{},keys:{},stats:{},subs:{},manual:{},config:{main:{classes:cl.map(c=>c.name),hidden:cl.filter(c=>c.hidden).map(c=>c.name),anon:cl.filter(c=>c.anonymized_at).map(c=>c.name)}},roster:{main:{lists:{}}}};
   for(const x of st){idx.studentBySid[x.sid]=x;idx.studentById[x.id]=x;const cn=cById[x.class_id];if(cn)(L.roster.main.lists[cn]=L.roster.main.lists[cn]||[]).push({id:x.sid,name:x.name,uid:x.id,must:x.must_change_pw!==false,locked:!!x.locked_until&&Date.parse(x.locked_until)>Date.now()})}
   for(const l of Object.values(L.roster.main.lists))l.sort((a,b)=>a.id.localeCompare(b.id));
   for(const t of ts)L.tests[t.id]={title:t.title,date:t.test_date||'',created:t.created_at||'',items:t.items||[],openFor:[],releasedFor:[],closedOnce:false,key:''};
-  for(const r of tc){const T=L.tests[r.test_id];const n=cById[r.class_id];if(!T||!n)continue;if(r.is_open)T.openFor.push(n);if(r.released)T.releasedFor.push(n);if(r.closed_once)T.closedOnce=true;
+  for(const r of tc){const T=L.tests[r.test_id];const n=cById[r.class_id];if(!T||!n)continue;if(r.is_open)T.openFor.push(n);if(r.released){T.releasedFor.push(n);T.relAt=Math.max(T.relAt||0,Date.parse(r.released_at||0)||0)}if(r.closed_once)T.closedOnce=true;
     if(r.stats){const X=L.stats[r.test_id]=L.stats[r.test_id]||{all:null,byClass:{},at:0};X.byClass[n]=r.stats;X.at=Math.max(X.at,Date.parse(r.released_at||0)||0)}}
   for(const k of tk)L.keys[k.test_id]={a:k.answers||'',nat:k.nat,ex:k.ex,tags:k.tags};
   for(const x of sub){const s0=idx.studentById[x.student_id];if(!s0)continue;const m=L.manual[s0.id]=L.manual[s0.id]||{name:s0.sid+' '+s0.name,answers:{}};m.answers[x.test_id]={a:x.answers,at:Date.parse(x.submitted_at)||0,cls:cById[s0.class_id]||'',src:x.src}}
@@ -113,11 +123,15 @@ function render(){
   app.innerHTML=html;
   afterRender();
 }
+/* 시험 칩: 고른 반에서 열었거나 공개했거나 답안이 있는 시험만 보이고, 나머지는 '▶ 준비 중인 시험 N개'로 접는다(실시간 현황과 같은 방식). */
 function testChips(sel,act='sel-test',filter=null){
   const ts=testList().filter(filter||(()=>true));
-  return `<div class="chips" role="group" aria-label="시험 회차">${ts.map(t=>{const [c,l]=statusOf(t);return `<button class="chip" aria-pressed="${t.id===sel}" data-act="${act}" data-v="${t.id}">${esc(t.title)} <span class="pill ${c}" style="margin-left:4px">${l}</span></button>`}).join('')}</div>`;
+  const {main,more}=splitTestChips(ts,scopeClasses(),t=>recordsFor(t.id).length>0);
+  const chip=t=>{const [c,l]=statusOf(t);return `<button class="chip" aria-pressed="${t.id===sel}" data-act="${act}" data-v="${t.id}">${esc(t.title)} <span class="pill ${c}" style="margin-left:4px">${l}</span></button>`};
+  const inMore=more.some(t=>t.id===sel);
+  return `<div class="test-picker">${main.length?`<div class="chips" role="group" aria-label="시험 회차">${main.map(chip).join('')}</div>`:'<p class="sub">이 반에서 연 시험이 아직 없습니다.</p>'}${more.length?`<details class="lv-more" ${inMore||!main.length?'open':''}><summary>준비 중인 시험 ${more.length}개</summary><div class="chips" style="margin-top:8px" role="group" aria-label="준비 중인 시험">${more.map(chip).join('')}</div></details>`:''}</div>`;
 }
-function ensureSel(){const ts=testList();if(!ts.length){S.selTest=null;return null}if(!S.selTest||!D().tests[S.selTest]){const withRecs=[...ts].reverse().find(t=>recordsFor(t.id).length);S.selTest=(withRecs||ts[ts.length-1]).id}return {id:S.selTest,...D().tests[S.selTest]}}
+function ensureSel(){const ts=testList();if(!ts.length){S.selTest=null;return null}if(!S.selTest||!D().tests[S.selTest])S.selTest=defaultTestId();return {id:S.selTest,...D().tests[S.selTest]}}
 function noTests(){return `<div class="card empty"><h2>아직 만든 시험이 없습니다</h2><p>시험 관리에서 회차를 만들고 정답을 입력하면, 학생이 답안을 내는 즉시 이곳에 문항별 정답률과 선지 분포가 나타납니다.</p><div class="row" style="justify-content:center"><button class="btn primary" data-act="tab" data-v="manage">시험 만들기</button>${S.demo?'':'<button class="btn" data-act="demo-on">예시 데이터로 둘러보기</button>'}</div></div>`}
 
 /* ----- 반 분석 ----- */
@@ -126,7 +140,7 @@ function viewClass(){
   const key=keyOf(t.id);const nat=natOf(t.id);const recs=recordsFor(t.id);
   let h=`<div class="stack">${testChips(t.id)}`;
   const keyMissing=t.items.some((_,i)=>!key[i]||key[i]==='0');
-  if(!recs.length){return h+`<div class="card empty"><h2>${esc(t.title)}: 제출된 답안이 없습니다</h2><p>${effClasses().some(c=>isOpen(t,c))?'학생들이 이 페이지 링크로 들어와 답안을 내면 여기에 바로 집계됩니다.':'시험 관리에서 이 회차의 응시를 열거나, 종이 답안을 직접 입력해 주세요.'}</p><button class="btn" data-act="tab" data-v="manage">시험 관리로</button></div></div>`}
+  if(!recs.length){const op=scopeClasses().some(c=>isOpen(t,c));return h+`<div class="card"><h2>${esc(t.title)}</h2>${op?frStagePanel(t,keyMissing):''}<div class="empty" style="padding:20px 8px 8px"><h3>제출된 답안이 없습니다</h3><p>${op?'학생들이 이 페이지 링크로 들어와 답안을 내면 여기에 바로 집계됩니다.':'시험 관리에서 이 회차의 응시를 열거나, 종이 답안을 직접 입력해 주세요.'}</p><button class="btn" data-act="tab" data-v="manage">시험 관리로</button></div></div></div>`}
   const an=analyze(t,key,recs);
   const it=an.items.filter(x=>x.n);
   const rl=rosterLists();const pool=S.cf?(rl[S.cf]||[]).map(p=>({...p,cls:S.cf})):Object.entries(rl).flatMap(([c,l])=>l.map(p=>({...p,cls:c})));const done=new Set(recs.map(r=>ident(r.name)));const miss=pool.filter(p=>!done.has(p.id));const extra=pool.length?recs.filter(r=>!pool.some(p=>p.id===ident(r.name))):[];
@@ -194,8 +208,8 @@ function viewStudentReport(){
     <h3 style="margin-top:18px">반보다 약한 유형</h3>${r.weak.length?barRows(r.weak.map(x=>({label:x.name,v:x.me,w:x.cls})),{a:rec.name,b:'반 평균'}):'<p class="muted">반 평균보다 20%p 이상 낮은 유형(2문항 이상)이 없습니다.</p>'}</div></div>
   ${setCard(r)}${tagCard(myPicks,clsPicks,'t')}${r.rare.length?`<div class="card"><h3>드물게 고른 오답</h3><p class="sub" style="margin-bottom:8px">전국 응시자 5% 이하가 고른 선지를 골라 틀린 문항입니다(전국 자료가 없는 문항은 반에서 혼자 고른 경우). 함정이 아니라 발문·지문을 잘못 읽었거나 마킹 실수였을 가능성이 큽니다.</p><div class="focus-list">${r.rare.map(x=>`<div class="focus-item"><div class="qno">${esc(x.no)}</div><div>${esc(x.area)}${x.type?' · '+esc(x.type):''}<div class="why"><span class="pill" style="color:var(--bad)">고른 답 ${CIR[+x.mine]}</span><span class="pill" style="color:var(--s1)">정답 ${CIR[+x.ans]}</span></div></div><div class="num" style="text-align:right">${x.src==='전국'?'전국 '+(Math.round(x.sh*1000)/10)+'%가 선택':'반에서 혼자 선택'}</div></div>`).join('')}</div></div>`:''}
   <div class="grid2"><div class="card"><h3>회차별 점수 추이 (100점 환산)</h3>${lineChart(tr.map(x=>x.label),[{name:rec.name,color:'var(--s2)',values:tr.map(x=>x.me)},{name:'반 평균',color:'var(--s1)',values:tr.map(x=>x.cls)}])}</div>
-  <div class="card"><h3>개별 피드백 문구</h3><p class="sub" style="margin-bottom:8px">자동으로 만든 초안입니다. 고친 다음 복사해서 보내세요.</p><textarea id="fbText" rows="9" style="font-family:var(--f-body);font-size:14px">${esc(fb)}</textarea><div class="row" style="margin-top:8px"><button class="btn primary" data-act="copy-fb">피드백 복사</button></div></div></div>
-  ${tr.some(x=>x.hm!=null)?`<div class="card"><h3>어려운 문항 정답률 추이 (전국 오답률 상위 15문항 기준)</h3><p class="sub" style="margin-bottom:8px">회차마다 난도가 달라 점수만으로는 성장을 보기 어렵습니다. 전국에서 많이 틀린 문항만 골라 전국 정답률과 나란히 봅니다. 회차당 해당 문항이 적으면 값이 크게 흔들리니 여러 회차를 묶어서 보세요.</p>${lineChart(tr.map(x=>x.label),[{name:rec.name,color:'var(--s2)',values:tr.map(x=>x.hm)},{name:'반',color:'var(--s1)',values:tr.map(x=>x.hc)},{name:'전국',color:'var(--muted)',values:tr.map(x=>x.hn)}])}</div>`:''}
+  <div class="card"><h3 class="h-tag">개별 피드백 문구(자동 초안) <span class="vis-tag off">학생에게 안 보임 · 복사해서 쓰는 글</span></h3><p class="sub" style="margin-bottom:8px">자동으로 만든 초안입니다. 고친 다음 복사해서 보내세요. 여기 적은 글은 저장되지 않습니다.</p><textarea id="fbText" rows="9" style="font-family:var(--f-body);font-size:14px">${esc(fb)}</textarea><div class="row" style="margin-top:8px"><button class="btn primary" data-act="copy-fb">피드백 복사</button></div></div></div>
+  ${tr.some(x=>x.hm!=null)?`<div class="card"><h3>어려운 문항 정답률 추이 (전국 오답률 상위 15문항 기준)</h3><p class="sub" style="margin-bottom:8px">회차마다 난도가 달라 점수만으로는 성장을 보기 어렵습니다. 전국에서 많이 틀린 문항만 골라 전국 정답률과 나란히 봅니다. 회차당 해당 문항이 적으면 값이 크게 흔들리니 여러 회차를 묶어서 보세요.</p>${natTrendChart(tr.map(x=>x.label),[{name:rec.name,color:'var(--s2)',values:tr.map(x=>x.hm)},{name:'반',color:'var(--s1)',values:tr.map(x=>x.hc)},{name:'전국',color:'var(--muted)',values:tr.map(x=>x.hn)}])}</div>`:''}
   <div class="card"><h3>틀린 문항 전체</h3>${r.wrong.length?`<div class="tbl-wrap"><table><thead><tr><th>번호</th><th>영역 · 유형</th><th>고른 답</th><th>정답</th><th class="n">반 정답률</th>${nat?'<th class="n">전국</th>':''}<th class="n">같은 답 고른 비율</th></tr></thead><tbody>${r.wrong.map(x=>{const itx=an.items[x.i];return `<tr><td class="mono"><b>${esc(x.no)}</b></td><td>${esc(x.area)}${x.type?' · '+esc(x.type):''}${exBlock(D().keys[t.id]?.ex?.[x.i])}</td><td class="mono">${(x.mine==='0'?'무응답':CIR[+x.mine])}</td><td class="mono">${CIR[+x.ans]}</td><td class="n">${pct(x.rate)}</td>${nat?`<td class="n">${pct(x.nr)}</td>`:''}<td class="n">${pct(itx.dist[+x.mine]||0)}</td></tr>`}).join('')}</tbody></table></div>`:'<p class="muted">틀린 문항이 없습니다.</p>'}</div></div>`;
   return h;
 }
@@ -214,7 +228,7 @@ function viewTrend(){
   const names=Object.keys(stu).sort((a,b)=>a.localeCompare(b,'ko'));
   const cell=(nm,ty)=>{const s=stu[nm][ty];if(!s||!s.n)return '<td class="muted">·</td>';const d=s.c/s.n-tot[ty].c/tot[ty].n;const m=Math.min(55,Math.round(Math.abs(d)*110));return `<td style="background:color-mix(in oklab, ${d>=0?'var(--div-pos)':'var(--div-neg)'} ${m}%, var(--div-mid))" data-tip="${esc(nm+' · '+ty+'\n본인 '+pct(s.c/s.n)+' ('+s.c+'/'+s.n+') · 반 '+pct(tot[ty].c/tot[ty].n))}">${pp(d)}</td>`};
   const hd=ans.map(({t,an})=>{const nt=natOf(t.id);if(!nt)return {hc:null,hn:null};const its=an.items.filter(x=>x.n&&nt[x.i]?.r!=null);if(its.length<2)return {hc:null,hn:null};return {hc:its.reduce((a,x)=>a+x.rate,0)/its.length,hn:its.reduce((a,x)=>a+nt[x.i].r,0)/its.length}});
-  const hardCard=hd.some(x=>x.hc!=null)?`<div class="card"><h3>어려운 문항 정답률: 반과 전국 (전국 오답률 상위 15문항 기준)</h3>${lineChart(ans.map(x=>x.t.title),[{name:'반',color:'var(--s1)',values:hd.map(x=>x.hc)},{name:'전국',color:'var(--muted)',values:hd.map(x=>x.hn)}])}<p class="sub">반 선이 전국 선에 가까워지거나 넘어서면 어려운 문항을 다루는 힘이 늘고 있다는 뜻입니다.</p></div>`:'';
+  const hardCard=hd.some(x=>x.hc!=null)?`<div class="card"><h3>어려운 문항 정답률: 반과 전국 (전국 오답률 상위 15문항 기준)</h3>${natTrendChart(ans.map(x=>x.t.title),[{name:'반',color:'var(--s1)',values:hd.map(x=>x.hc)},{name:'전국',color:'var(--muted)',values:hd.map(x=>x.hn)}])}<p class="sub">반 선이 전국 선에 가까워지거나 넘어서면 어려운 문항을 다루는 힘이 늘고 있다는 뜻입니다.</p></div>`:'';
   return `<div class="stack"><div class="grid2">
    <div class="card"><h3>반 평균 추이 (100점 환산)</h3>${lineChart(ans.map(x=>x.t.title),[{name:'반 평균',color:'var(--s1)',values:ans.map(x=>x.an.avgPct)}])}<p class="sub">회차마다 시험 난이도가 다르므로, 전국 정답률을 넣은 회차는 반 분석의 '차이' 열과 함께 보세요.</p></div>
    <div class="card"><h3>영역별 정답률 추이</h3>${lineChart(ans.map(x=>x.t.title),areas.map(a=>({name:a,color:AREA_COLOR[a],values:ans.map(x=>x.an.area[a]??null)})))}</div></div>${hardCard}
@@ -235,18 +249,31 @@ function startEdit(id){
   else S.edit={id:null,title:'',date:new Date().toISOString().slice(0,10),items:newItems('single'),key:Array(45).fill('0'),nat:[],ex:[],tags:[]};
   S.natText='';S.exText='';S.tagText='';confirmItems=false;
 }
+/* '⋯' 더보기 메뉴(자주 안 쓰는 버튼을 숨겨 둔다) */
+function moreMenu(inner,label,text='⋯'){return `<details class="more-menu"><summary aria-label="${esc(label||'더보기')}" title="더보기">${esc(text)}</summary><div class="more-pop">${inner}</div></details>`}
+/* 응시 열기 확인 문구: '3차시를 test반에 엽니다.' */
+function openMsg(t,c){const lb=sessionLabel(t.title,40);const m=/차시$/.test(lb)?lb+'를':`'${lb}'을(를)`;return `${m} ${c}에 엽니다. 학생 폰에 바로 답안지가 뜹니다.`}
+/* 반 하나의 응시 버튼: 숨김 → 표시만, 결과 공개됨 → 표시만(공개를 취소하면 다시 버튼), 응시 중 → 닫기, 아니면 열기(한 번 더 확인) */
+function openCtl(t,c){
+  if(!c&&allClasses().length)return '';const nm=c?esc(c)+' ':'';const v=`${t.id}|${esc(c)}`;
+  if(isHiddenCls(c))return `<span class="badge">${esc(c)} 숨김</span>`;
+  if(isRel(t,c))return `<span class="badge good" title="결과 공개를 취소하면 다시 응시를 열 수 있습니다">${nm}결과 공개됨</span>`;
+  if(isOpen(t,c))return `<button class="btn small" data-act="close" data-v="${v}">${nm}응시 닫기</button>`;
+  if(S.confirm==='open:'+t.id+'|'+c)return `<span class="confirm" role="alert">${esc(openMsg(t,c))} <span class="row" style="gap:6px"><button class="btn small primary" data-act="open" data-v="${v}">열기</button><button class="btn small" data-act="cancel-confirm">취소</button></span></span>`;
+  return `<button class="btn small" data-act="open-ask" data-v="${v}">${nm}응시 열기</button>`;
+}
 function viewManage(){
   if(S.edit)return viewEditor();
   if(S.reg)return viewRegister();// js/register.js
   const ts=testList();
   let h=`<div class="stack"><div class="card"><div class="row" style="justify-content:space-between"><div><h2>시험 회차</h2><p class="sub">회차를 만들고 정답을 넣은 뒤 응시를 열면, 학생 화면에 답안지가 나타납니다.</p></div><div class="row"><button class="btn primary" data-act="new-test">새 시험 만들기</button><button class="btn" data-act="reg-open">파일로 새 시험 만들기</button>${S.demo?'':'<button class="btn" data-act="demo-on">예시 데이터로 둘러보기</button>'}</div></div>`;
   if(!ts.length)h+=`<p class="note" style="margin-top:14px">아직 시험이 없습니다. <b>새 시험 만들기</b>를 누르면 45문항 틀이 미리 채워집니다. 영역 구분은 실제 시험지를 보고 맞춰 주세요.</p>`;
-  else h+=`<div class="tbl-wrap" style="margin-top:14px"><table><thead><tr><th>시험</th><th>상태</th><th class="n">답안</th><th>정답</th><th>전국 자료</th><th></th></tr></thead><tbody>${ts.map(t=>{const [c,l]=statusOf(t);const k=keyOf(t.id);const filled=t.items.filter((_,i)=>k[i]&&k[i]!=='0').length;const nat=natOf(t.id);const cf=S.confirm==='del:'+t.id;return `<tr><td><b>${esc(t.title)}</b><br><span class="muted">${esc(t.date||'')}</span></td><td>${classes().length?classes().map(cc=>{const [c2,l2]=statusOf(t,cc);return `<div><span class="pill ${c2}">${esc(cc)} ${l2}</span></div>`}).join(''):`<span class="pill ${c}">${l}</span>`}</td><td class="n">${recordsFor(t.id,'').length}</td><td class="num">${filled}/${t.items.length}</td><td>${nat&&nat.some(Boolean)?'있음':'<span class="muted">없음</span>'}</td><td><div class="row" style="gap:6px">${effClasses().map(c=>!c&&allClasses().length?'':isHiddenCls(c)?`<span class="badge">${esc(c)} 숨김</span>`:isOpen(t,c)?`<button class="btn small" data-act="close" data-v="${t.id}|${esc(c)}">${c?esc(c)+' ':''}응시 닫기</button>`:`<button class="btn small" data-act="open" data-v="${t.id}|${esc(c)}">${c?esc(c)+' ':''}응시 열기</button>`).join('')}<button class="btn small" data-act="edit" data-v="${t.id}">편집</button>${cf?`<span class="confirm">이 시험에 낸 답안 기록도 함께 지워집니다 <button class="btn small red" data-act="del-yes" data-v="${t.id}">삭제</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:`<button class="btn small ghost" data-act="del" data-v="${t.id}">삭제</button>`}</div></td></tr>`}).join('')}</tbody></table></div>`;
+  else h+=`<div class="tbl-wrap" style="margin-top:14px"><table class="mt-table"><thead><tr><th>시험</th><th>상태</th><th class="n">답안</th><th>정답</th><th>전국 자료</th><th></th></tr></thead><tbody>${ts.map(t=>{const [c,l]=statusOf(t);const k=keyOf(t.id);const filled=t.items.filter((_,i)=>k[i]&&k[i]!=='0').length;const nat=natOf(t.id);const cf=S.confirm==='del:'+t.id;return `<tr${effClasses().some(cc=>isOpen(t,cc))?' class="is-open"':''}><td><b>${esc(t.title)}</b><br><span class="muted">${esc(t.date||'')}</span></td><td>${classes().length?classes().map(cc=>{const [c2,l2]=statusOf(t,cc);return `<div><span class="pill ${c2}">${esc(cc)} ${l2}</span></div>`}).join(''):`<span class="pill ${c}">${l}</span>`}</td><td class="n">${recordsFor(t.id,'').length}</td><td class="num">${filled}/${t.items.length}</td><td>${nat&&nat.some(Boolean)?'있음':'<span class="muted">없음</span>'}</td><td><div class="row" style="gap:6px">${effClasses().map(c=>openCtl(t,c)).join('')}<button class="btn small" data-act="edit" data-v="${t.id}">편집</button>${cf?`<span class="confirm">이 시험에 낸 답안 기록도 함께 지워집니다 <button class="btn small red" data-act="del-yes" data-v="${t.id}">삭제</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:moreMenu(`<button class="btn small ghost danger" data-act="del" data-v="${t.id}">시험 삭제…</button>`,'시험 '+t.title+' 더보기')}</div></td></tr>`}).join('')}</tbody></table></div>`;
   h+='</div>';
   {const x={...SITE_DEFAULT,...(S.site||{})};h+=`<div class="card"><h3>사이트 제목</h3><p class="sub" style="margin-bottom:10px">학생 화면과 교사 화면 맨 위에 보이는 제목과 그 위의 작은 설명 줄입니다.</p><div class="row" style="align-items:flex-end"><label class="f" style="flex:1;min-width:160px">제목<input type="text" id="siteTitle" maxlength="40" value="${esc(x.title)}"></label><label class="f" style="flex:2;min-width:200px">학생 화면 설명 줄<input type="text" id="siteStu" maxlength="60" value="${esc(x.student_subtitle)}"></label><label class="f" style="flex:2;min-width:200px">교사 화면 설명 줄<input type="text" id="siteTch" maxlength="60" value="${esc(x.teacher_subtitle)}"></label><button class="btn primary" data-act="site-save">제목 저장</button></div></div>`}
   h+=`<p class="note">반 만들기, 학생 명단, 비밀번호 초기화는 위쪽 <button class="btn small" data-act="tab" data-v="classes">반 관리</button> 탭으로 옮겼습니다.</p>`;
   if(ts.length){
-    if(!S.importTest||!D().tests[S.importTest])S.importTest=ts[ts.length-1].id;
+    if(!S.importTest||!D().tests[S.importTest])S.importTest=defaultTestId(effClasses());
     const it=D().tests[S.importTest];
     const pv=S.importPreview;
     h+=`<div class="grid2"><div class="card"><h3>종이 답안 입력</h3>
@@ -298,7 +325,8 @@ document.addEventListener('click',async e=>{
     case 'copy-fb':copy($('#fbText').value,$('#fbText'));break;
     case 'release':{const t=D().tests[v];const key=keyOf(v);const tg=S.cf?[S.cf]:liveClasses();if(!tg.length){toast('반을 먼저 만들어 주세요');break}await api(async()=>{for(const c of tg){const rs=recordsFor(v,c);const stats=rs.length?toStats(analyze(t,key,rs)):null;chk(await sb.from('test_class').upsert({test_id:v,class_id:clsId(c),released:true,released_at:nowIso(),stats},{onConflict:'test_id,class_id'}))}},(S.cf?S.cf+'에 ':'')+'결과를 공개했습니다');break}
     case 'unrelease':{const tg=S.cf?[S.cf]:liveClasses();await api(async()=>{for(const c of tg)chk(await sb.from('test_class').update({released:false,released_at:null,stats:null}).eq('test_id',v).eq('class_id',clsId(c)))},'공개를 취소했습니다');break}
-    case 'open':{const [id,c]=v.split('|');if(!c){toast('반을 먼저 만들어 주세요');break}if(isHiddenCls(c)){toast('숨긴 반에는 응시를 열 수 없습니다. 반 관리에서 다시 보이게 해 주세요');break}await api(async()=>chk(await sb.from('test_class').upsert({test_id:id,class_id:clsId(c),is_open:true},{onConflict:'test_id,class_id'})),c+' 응시를 열었습니다');break}
+    case 'open-ask':S.confirm='open:'+v;render();break;
+    case 'open':{const [id,c]=v.split('|');S.confirm=null;if(!c){toast('반을 먼저 만들어 주세요');break}if(D().tests[id]&&isRel(D().tests[id],c)){toast(c+'에는 이미 결과를 공개했습니다. 다시 열려면 반 분석에서 결과 공개를 먼저 취소하세요');render();break}if(isHiddenCls(c)){toast('숨긴 반에는 응시를 열 수 없습니다. 반 관리에서 다시 보이게 해 주세요');break}await api(async()=>chk(await sb.from('test_class').upsert({test_id:id,class_id:clsId(c),is_open:true},{onConflict:'test_id,class_id'})),c+' 응시를 열었습니다');break}
     case 'close':{const [id,c]=v.split('|');await api(async()=>chk(await sb.from('test_class').update({is_open:false,closed_once:true}).eq('test_id',id).eq('class_id',clsId(c))),c+' 응시를 닫았습니다');break}
     case 'del':S.confirm='del:'+v;render();break;
     case 'del-yes':S.confirm=null;await api(async()=>chk(await sb.from('tests').delete().eq('id',v)),'시험과 그 답안을 지웠습니다');break;
@@ -331,7 +359,7 @@ document.addEventListener('click',async e=>{
 });
 document.addEventListener('change',e=>{
   const el=e.target;
-  if(el.id==='stuSel'){S.selStudent=el.value;render();return}
+  if(el.id==='stuSel'){frSwitch('stu',el.value);return}// js/feedback.js: 저장 안 된 한마디가 있으면 먼저 묻는다
   if(el.id==='impTest'){S.importTest=el.value;S.importPreview=null;render();return}
   if(S.edit){const tr=el.closest('tr[data-i]');if(tr&&el.dataset.f){const it=S.edit.items[+tr.dataset.i];it[el.dataset.f]=el.value.trim();if(el.dataset.f==='area'){const ty=$('#ty-'+tr.dataset.i);if(ty)ty.setAttribute('list','dl-'+el.value)}}}
 });

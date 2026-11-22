@@ -157,4 +157,10 @@ function explainPriority(items,key,submissions,retries){
   return out.sort((a,b)=>b.again-a.again||b.wrongRate-a.wrongRate||a.i-b.i);
 }
 
-if(typeof module!=='undefined'&&module.exports)module.exports={testOrder,visibleClasses,loginErrorMsg,rosterPlan,parseNat,parseEx,parseRanges,pwProblem,PW_MIN,EX_MAX,explainPriority};
+/* 그래프 가로축 이름: 제목의 'N차시'만(예: '근본국어 3차시 · 독서(사회)' → '3차시'). 차시가 없으면 짧게 줄인 제목. */
+function sessionLabel(title,max=9){
+  const s=String(title??'').trim();const m=s.match(/(\d+)\s*차시/);if(m)return (+m[1])+'차시';
+  return s.length>max?s.slice(0,max)+'…':s;
+}
+
+if(typeof module!=='undefined'&&module.exports)module.exports={sessionLabel,testOrder,visibleClasses,loginErrorMsg,rosterPlan,parseNat,parseEx,parseRanges,pwProblem,PW_MIN,EX_MAX,explainPriority};

@@ -54,7 +54,7 @@ async function dxBackup(){
 /* ---------- 화면 ---------- */
 function viewData(){
   const X=DX();const ts=testList();const cl=allClasses();
-  if(X.tid&&!D().tests[X.tid])X.tid='';if(!X.tid&&ts.length)X.tid=ts[ts.length-1].id;
+  if(X.tid&&!D().tests[X.tid])X.tid='';if(!X.tid&&ts.length)X.tid=defaultTestId(cl.length?cl:[""]);// 가장 최근에 열었거나 공개한(또는 답안이 들어온) 시험
   if(X.tcls&&!cl.includes(X.tcls))X.tcls='';if(!X.ccls||!cl.includes(X.ccls))X.ccls=cl[0]||'';
   const clsOpt=(sel,all)=>(all?`<option value="" ${sel?'':'selected'}>모든 반</option>`:'')+cl.map(c=>`<option value="${esc(c)}" ${c===sel?'selected':''}>${esc(c)}${isHiddenCls(c)?' (숨김)':''}</option>`).join('');
   let h=`<div class="stack"><div class="card"><h2>자료 내보내기</h2><p class="sub">엑셀에서 바로 열리는 CSV 파일로 내려받습니다. 학생 비밀번호와 로그인 정보는 어떤 파일에도 들어가지 않습니다. 숨긴 반도 고를 수 있습니다.</p></div>

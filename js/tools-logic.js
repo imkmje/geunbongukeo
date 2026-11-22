@@ -102,8 +102,11 @@ function liveBoard(test,key,recs){
   }
   const sm={};for(const x of items){if(!x.set||x.wrongRate==null)continue;const s=sm[x.set]=sm[x.set]||{name:x.set,nos:[],sum:0,k:0};s.nos.push(x.no);s.sum+=x.wrongRate;s.k++}
   const sets=Object.values(sm).map(s=>({name:s.name,nos:s.nos,wrongRate:s.sum/s.k}));
+  // 지문 세트가 없는 문항(예: 언어 1번)은 영역별로 따로 묶는다 → 화면에는 '언어(1번)'
+  const lm={};for(const x of items){if(x.set||x.wrongRate==null)continue;const k=x.area||'기타';const s=lm[k]=lm[k]||{name:k,nos:[],sum:0,k:0};s.nos.push(x.no);s.sum+=x.wrongRate;s.k++}
+  const loose=Object.values(lm).map(s=>({name:s.name,nos:s.nos,wrongRate:s.sum/s.k}));
   const scored=items.filter(x=>x.wrongRate!=null);
-  return {n:recs.length,items,sets,avgWrong:scored.length?scored.reduce((a,x)=>a+x.wrongRate,0)/scored.length:null};
+  return {n:recs.length,items,sets,loose,avgWrong:scored.length?scored.reduce((a,x)=>a+x.wrongRate,0)/scored.length:null};
 }
 function sortBoard(items,by){const a=[...items];if(by==='wrong')a.sort((x,y)=>(y.wrongRate??-1)-(x.wrongRate??-1)||x.i-y.i);else a.sort((x,y)=>x.i-y.i);return a}
 
@@ -160,4 +163,34 @@ function sessionEntry(n,statText,exText){
     pts3:items2.filter(it=>it.pts===3).map(it=>it.no),warn};
 }
 
-if(typeof module!=='undefined'&&module.exports)module.exports={tlGrade,csvCell,toCsv,CSV_BOM,safeFileName,testCsvRows,classCumRows,classAnswerRows,anonPlan,isAnon,liveBoard,sortBoard,pairSessionFiles,sessionTitle,sessionEntry};
+/* ---------- 시험 고르기 (반 분석·학생 리포트 칩, 기본 선택) ---------- */
+/* 고른 반(들)에서 응시가 열렸거나 결과를 공개했거나 답안이 하나라도 있는 시험은 위에(main), 나머지는 '준비 중인 시험'으로 접는다(more).
+   tests [{id,openFor,releasedFor}] (보여 줄 순서), classes: 고른 반 이름 목록, hasRecs(test)→bool */
+function splitTestChips(tests,classes,hasRecs){
+  const cs=(classes||[]).filter(c=>c!=null);const main=[],more=[];
+  for(const t of tests||[]){
+    const live=cs.some(c=>(t.openFor||[]).includes(c)||(t.releasedFor||[]).includes(c))||(hasRecs?!!hasRecs(t):false);
+    (live?main:more).push(t);
+  }
+  return {main,more};
+}
+/* 기본으로 고를 시험: 지금 응시 중인 시험 → 가장 최근에 결과를 공개했거나 답안이 들어온 시험 → (아무 활동이 없으면) 목록의 마지막.
+   rows [{id,open:bool,relAt:ms,lastAt:ms}] (목록 순서). 같으면 목록에서 뒤에 있는 것. */
+function pickDefaultTest(rows){
+  const L=rows||[];if(!L.length)return null;
+  const act=r=>Math.max(+r.relAt||0,+r.lastAt||0);
+  let best=null;
+  for(const r of L){
+    if(!best){best=r;continue}
+    const a=[r.open?1:0,act(r)],b=[best.open?1:0,act(best)];
+    if(a[0]>b[0]||(a[0]===b[0]&&a[1]>=b[1]))best=r;
+  }
+  if(!best.open&&!act(best))best=L[L.length-1];
+  return best.id;
+}
+/* 정답 미리 보기: 5개씩 띄어 쓴다 '5254234515' → '52542 34515' */
+function groupKey(key,n=5){const s=String(key||'');const out=[];for(let i=0;i<s.length;i+=n)out.push(s.slice(i,i+n));return out.join(' ')}
+/* 정답 풀어 쓰기(마우스를 올리거나 누르면): '1번 5, 2번 2, …'. items가 있으면 그 문항 번호를 쓴다. */
+function keyTip(key,items){return Array.from(String(key||''),(d,i)=>`${items&&items[i]?items[i].no:i+1}번 ${d==='0'?'?':d}`).join(', ')}
+
+if(typeof module!=='undefined'&&module.exports)module.exports={splitTestChips,pickDefaultTest,groupKey,keyTip,tlGrade,csvCell,toCsv,CSV_BOM,safeFileName,testCsvRows,classCumRows,classAnswerRows,anonPlan,isAnon,liveBoard,sortBoard,pairSessionFiles,sessionTitle,sessionEntry};

@@ -26,9 +26,9 @@ body:has(.proj){overflow:hidden}
 .pj-note{font-size:16px;color:var(--warn);margin:0 0 12px}
 .pj-sets{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr));gap:12px;margin-bottom:16px}
 .pj-set{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px 16px;display:grid;grid-template-columns:1fr auto;gap:2px 12px;align-items:baseline}
-.pj-set-n{font-weight:700;font-size:19px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pj-set-q{grid-column:1;color:var(--ink2);font-size:15px}
-.pj-set-v{grid-column:2;grid-row:1/3;font-size:36px;font-weight:700;font-variant-numeric:tabular-nums;align-self:center}
+.pj-set-n{grid-column:1/-1;font-weight:700;font-size:19px;min-width:0;line-height:1.3;overflow-wrap:anywhere}
+.pj-set-q{grid-column:1;grid-row:2;color:var(--ink2);font-size:16px;align-self:end;padding-bottom:6px}
+.pj-set-v{grid-column:2;grid-row:2;font-size:36px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1.1}
 .pj-set-l{display:none}
 .pj-items{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:12px}
 .pj-item{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:grid;grid-template-columns:64px 1fr auto;gap:16px;align-items:center}
@@ -45,11 +45,11 @@ body:has(.proj){overflow:hidden}
 .pj-top b{color:var(--ink);font-size:22px}
 .pj-key{display:inline-block;margin-left:8px;padding:1px 10px;border-radius:999px;background:var(--s1);color:#fff;font-weight:700}
 .pj-dist{display:flex;gap:6px;align-items:flex-end}
-.pj-opt{display:flex;flex-direction:column;align-items:center;width:30px;height:100%;gap:2px}
-.pj-col{height:64px;width:100%;display:flex;align-items:flex-end}
-.pj-opt b{font-size:16px;font-weight:600;color:var(--ink2)}
+.pj-opt{display:flex;flex-direction:column;align-items:center;width:50px;height:100%;gap:2px}
+.pj-col{height:64px;width:34px;display:flex;align-items:flex-end}
+.pj-opt b{font-size:20px;font-weight:600;color:var(--ink2)}
 .pj-opt i{display:block;width:100%;background:var(--line2);border-radius:4px 4px 0 0}
-.pj-opt em{font-style:normal;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.pj-opt em{font-style:normal;font-size:20px;font-weight:600;color:var(--ink2);font-variant-numeric:tabular-nums;white-space:nowrap;letter-spacing:-.02em}
 .pj-opt.top i{background:var(--s2)} .pj-opt.top b{color:var(--s2)}
 .pj-opt.ans i{background:var(--s1)} .pj-opt.ans b{color:var(--s1)}
 .pj-empty{font-size:24px;color:var(--ink2);text-align:center;padding:60px 0}
@@ -76,3 +76,43 @@ body:has(.proj){overflow:hidden}
 .rg-table tr.rg-skip td{color:var(--muted)}
 .rg-warn{color:var(--warn);font-size:13px;white-space:nowrap}
 .rg-new{white-space:nowrap;font-size:13.5px}
+/* 해설 화면: 세트 상자의 '오답률 8%', 지문 없는 문항 상자 */
+.pj-set-v small{font-size:17px;font-weight:600;color:var(--ink2);margin-right:2px}
+.pj-loose{border-style:dashed}
+.lv-proj-wrap{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
+.lv-proj-why{color:var(--warn);font-weight:600}
+
+/* '⋯' 더보기 메뉴 (시험 관리 줄 끝, 반 분석 공개 단계) */
+.more-menu{position:relative;display:inline-block}
+.more-menu>summary{list-style:none;cursor:pointer;border:1px solid transparent;border-radius:7px;padding:3px 9px;font-size:13px;color:var(--ink2);font-weight:600;white-space:nowrap}
+.more-menu>summary::-webkit-details-marker{display:none}
+.more-menu>summary:hover,.more-menu[open]>summary{border-color:var(--line2);background:var(--bg)}
+.more-pop{position:absolute;right:0;top:calc(100% + 4px);z-index:20;background:var(--paper);border:1px solid var(--line2);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:4px;box-shadow:0 6px 20px rgba(0,0,0,.12);min-width:150px}
+.more-pop .btn{text-align:left}
+
+/* 시험 관리: 응시 중인 줄 강조 */
+.mt-table tr.is-open td{background:color-mix(in oklab,var(--s1) 9%,var(--paper))}
+.mt-table tr.is-open td:first-child{box-shadow:inset 4px 0 0 var(--s1)}
+.mt-table .confirm{max-width:440px;padding:8px 10px;line-height:1.5}
+.more-menu>summary{font-size:16px;line-height:1.2}
+
+/* 반 분석: 시험 칩 접기, '지금 할 일' 한 줄 */
+.test-picker .lv-more summary{margin-top:8px}
+.now-line{margin:12px 0 0;padding:9px 12px;border-radius:8px;background:var(--omr-soft);color:var(--ink);font-size:14.5px;line-height:1.5}
+.now-line>b:first-child{color:var(--omr-ink);margin-right:6px}
+.link-btn{border:0;background:none;padding:0;font:inherit;color:var(--s1);font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.fr-auto{margin:6px 2px 0;font-size:12.5px}
+
+/* 학생 리포트: 어디에 보이는 글인지 알려 주는 작은 표시 */
+.h-tag{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.vis-tag{display:inline-block;font-size:11.5px;font-weight:600;line-height:1.4;padding:2px 8px;border-radius:999px;color:var(--good);background:color-mix(in oklab,var(--good) 9%,var(--paper));border:1px solid color-mix(in oklab,var(--good) 40%,transparent)}
+.vis-tag.off{color:var(--ink2);background:var(--bg);border-color:var(--line2)}
+.fb-state.bad{color:var(--bad);font-weight:600}
+.fb-flash{font-size:12.5px;color:var(--good)}
+.fb-pend{border:1.5px solid var(--warn);background:color-mix(in oklab,var(--warn) 9%,var(--paper));border-radius:8px;padding:10px 12px;margin-bottom:10px}
+.fb-pend p{margin:0 0 8px;font-size:14px}
+.fb-locked textarea{background:var(--bg);color:var(--muted);cursor:not-allowed}
+.fb-lock-msg{margin-top:2px;color:var(--warn);font-weight:600}
+
+/* 파일로 시험 만들기: 정답 5개씩 */
+.rg-key{letter-spacing:.04em;cursor:help}

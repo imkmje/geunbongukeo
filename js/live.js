@@ -30,6 +30,9 @@ function viewLive(){
   if(!t)return noTests();
   const open=lvOpenTests();const key=keyOf(t.id);
   const R=lvRoster(t);const M=R.rows.length;
+  // 해설 화면은 선지 비율로 정답이 드러나므로, 고른 반의 응시를 모두 닫은 뒤에만 연다.
+  const stillOpen=lvClasses().filter(c=>!isHiddenCls(c)&&isOpen(t,c));
+  if(L.proj&&stillOpen.length)L.proj=false;
   if(L.proj)return viewProjector(t,key,R);// 해설 화면만 그린다(아래 명단의 이름이 화면에 남지 않게)
   const chip=x=>`<button class="chip" aria-pressed="${x.id===t.id}" data-act="lv-test" data-v="${x.id}">${esc(x.title)}${lvClasses().some(c=>isOpen(x,c))?' <span class="pill open" style="margin-left:4px">응시 중</span>':''}</button>`;
   const others=testList().filter(x=>!open.some(o=>o.id===x.id));
@@ -40,12 +43,12 @@ function viewLive(){
   const ocs=lvClasses().filter(c=>!isHiddenCls(c));
   h+=`<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start">
       <div><h2>${esc(t.title)}</h2><p class="sub">${S.cf?esc(S.cf):(classes().length?'보이는 모든 반':'')}${S.cf||classes().length?' · ':''}문항 ${t.items.length}개</p></div>
-      <div class="row" style="gap:6px">${ocs.map(c=>isOpen(t,c)?`<span class="pill open">${esc(c)} 응시 중</span><button class="btn small" data-act="close" data-v="${t.id}|${esc(c)}">응시 닫기</button>`:`<button class="btn small" data-act="open" data-v="${t.id}|${esc(c)}">${esc(c)} 응시 열기</button>`).join('')}</div></div>
+      <div class="row" style="gap:6px">${ocs.map(c=>isOpen(t,c)?`<span class="pill open">${esc(c)} 응시 중</span><button class="btn small" data-act="close" data-v="${t.id}|${esc(c)}">응시 닫기</button>`:isRel(t,c)?`<span class="badge good">${esc(c)} 결과 공개됨</span>`:`<button class="btn small" data-act="open" data-v="${t.id}|${esc(c)}">${esc(c)} 응시 열기</button>`).join('')}</div></div>
     <div class="lv-count" role="status" aria-live="polite"><span class="big num">${R.done}<small>/${M}명</small></span><span class="lbl">제출</span></div>
     <div class="lv-prog" role="progressbar" aria-valuemin="0" aria-valuemax="${M}" aria-valuenow="${R.done}" aria-label="제출한 학생 비율"><i style="width:${pctDone}%"></i></div>
     <div class="row" style="margin-top:12px;justify-content:space-between">
       <span class="sub">${S.demo?'예시 데이터라 자동으로 바뀌지 않습니다.':`마지막 확인 ${esc(lvTime(L.at)||'–')} · 이 탭을 보고 있는 동안 10초마다 자동으로 다시 확인합니다.`}${L.err?` <span style="color:var(--bad)">${esc(L.err)}</span>`:''}</span>
-      <div class="row" style="gap:6px"><button class="btn" data-act="lv-refresh" ${L.busy?'disabled':''}>${L.busy?'확인하는 중…':'지금 새로고침'}</button><button class="btn primary" data-act="lv-proj">해설 화면 열기</button></div></div></div>`;
+      <div class="row" style="gap:6px"><button class="btn" data-act="lv-refresh" ${L.busy?'disabled':''}>${L.busy?'확인하는 중…':'지금 새로고침'}</button><span class="lv-proj-wrap">${stillOpen.length?'<span class="sub lv-proj-why" id="lvProjWhy">응시를 닫은 뒤에 열 수 있습니다</span>':''}<button class="btn primary" data-act="lv-proj" ${stillOpen.length?'disabled aria-describedby="lvProjWhy"':''}>해설 화면 열기</button></span></div></div></div>`;
   if(!M)h+=`<div class="card empty"><h3>${S.cf?esc(S.cf)+'에 ':''}학생 명단이 없습니다</h3><p>반 관리에서 명단을 넣으면 누가 냈는지 여기에 보입니다.</p></div>`;
   else{
     const miss=R.rows.filter(r=>!r.rec);
@@ -65,7 +68,7 @@ function viewProjector(t,key,R){
   const rate=v=>v==null?'–':Math.round(v*100)+'%';
   const tone=v=>v==null?'':v>=.5?'hi':v>=.3?'mid':'lo';
   const item=x=>{
-    const dist=[1,2,3,4,5].map(o=>{const v=x.n?x.cnt[o]/x.n:0;const isAns=L.showKey&&String(o)===x.ans;const isTop=x.top&&o===x.top.opt;return `<span class="pj-opt${isAns?' ans':''}${isTop?' top':''}"><em>${Math.round(v*100)}</em><span class="pj-col"><i style="height:${Math.max(2,Math.round(v*64))}px"></i></span><b>${CIR[o]}</b></span>`}).join('');
+    const dist=[1,2,3,4,5].map(o=>{const v=x.n?x.cnt[o]/x.n:0;const isAns=L.showKey&&String(o)===x.ans;const isTop=x.top&&o===x.top.opt;return `<span class="pj-opt${isAns?' ans':''}${isTop?' top':''}"><em>${Math.round(v*100)}%</em><span class="pj-col"><i style="height:${Math.max(2,Math.round(v*64))}px"></i></span><b>${CIR[o]}</b></span>`}).join('');
     return `<div class="pj-item"><div class="pj-no">${esc(x.no)}</div>
       <div class="pj-main"><div class="pj-rate ${tone(x.wrongRate)}"><span class="pj-pct">${rate(x.wrongRate)}</span><span class="pj-lbl">오답률</span></div>
         <div class="pj-bar"><i class="${tone(x.wrongRate)}" style="width:${x.wrongRate==null?0:Math.max(1,Math.round(x.wrongRate*100))}%"></i></div>
@@ -77,7 +80,7 @@ function viewProjector(t,key,R){
      <div class="row pj-ctrl"><div class="seg" role="group" aria-label="정렬"><button data-act="lv-sort" data-v="no" aria-pressed="${L.sort==='no'}">번호순</button><button data-act="lv-sort" data-v="wrong" aria-pressed="${L.sort==='wrong'}">오답률 높은 순</button></div>
        <button class="btn" data-act="lv-key" aria-pressed="${L.showKey}">${L.showKey?'정답 가리기':'정답 보이기'}</button><button class="btn" data-act="lv-full">전체 화면</button><button class="btn" data-act="lv-refresh">새로고침</button><button class="btn primary" data-act="lv-proj-off">닫기 (Esc)</button></div></div>
    ${!keyOk?'<p class="pj-note">정답이 비어 있는 문항은 오답률을 계산하지 않습니다.</p>':''}
-   ${B.sets.length?`<div class="pj-sets">${B.sets.map(s=>`<div class="pj-set"><span class="pj-set-n">${esc(s.name)}</span><span class="pj-set-q">${esc(s.nos.join(', '))}번</span><span class="pj-set-v ${tone(s.wrongRate)}">${rate(s.wrongRate)}</span><span class="pj-set-l">평균 오답률</span></div>`).join('')}</div>`:''}
+   ${B.sets.length||B.loose?.length?`<div class="pj-sets">${B.sets.map(s=>`<div class="pj-set"><span class="pj-set-n" title="${esc(s.name)}">${esc(s.name)}</span><span class="pj-set-q">${esc(s.nos.join(', '))}번</span><span class="pj-set-v ${tone(s.wrongRate)}"><small>오답률</small> ${rate(s.wrongRate)}</span></div>`).join('')}${(B.loose||[]).map(s=>`<div class="pj-set pj-loose"><span class="pj-set-n">${esc(s.name)}(${esc(s.nos.join(', '))}번)</span><span class="pj-set-q">지문 없는 문항</span><span class="pj-set-v ${tone(s.wrongRate)}"><small>오답률</small> ${rate(s.wrongRate)}</span></div>`).join('')}</div>`:''}
    ${B.n?`<div class="pj-items">${rows.map(item).join('')}</div>`:'<div class="pj-empty">아직 들어온 답안이 없습니다. 학생이 내면 10초 안에 나타납니다.</div>'}
   </div>`;
 }
@@ -114,7 +117,7 @@ document.addEventListener('click',async e=>{
     case 'tab':if(v==='live')setTimeout(()=>{if(S.tab==='live'&&!S.demo)lvRefresh()},0);else if(L.proj)L.proj=false;break;
     case 'lv-test':L.tid=v;L.at=0;render();lvRefresh();break;
     case 'lv-refresh':lvRefresh();if(!S.demo)render();break;
-    case 'lv-proj':L.proj=true;render();break;
+    case 'lv-proj':{const t=lvTest();if(t&&lvClasses().some(c=>!isHiddenCls(c)&&isOpen(t,c))){toast('응시를 닫은 뒤에 해설 화면을 열 수 있습니다');break}L.proj=true;render();break}
     case 'lv-proj-off':L.proj=false;if(document.fullscreenElement)document.exitFullscreen?.();render();break;
     case 'lv-sort':L.sort=v;render();break;
     case 'lv-key':L.showKey=!L.showKey;render();break;
