@@ -1,6 +1,6 @@
 "use strict";
 /* 근본국어: 화면(DOM) 없이 돌아가는 순수 함수. 교사·학생 화면과 tests/가 함께 쓴다.
-   - parseNat: '사이트등록_통계' 파일(# 정답·# 배점 3점 문항·# 영역·# 세트 줄 + 전국 정답률 줄)
+   - parseNat: '사이트등록_통계' 파일(# 정답·# 배점 3점 문항·# 영역·# 세트·# 유형 줄 + 전국 정답률 줄)
    - parseEx: '사이트등록_해설' 파일([번호] 정답 ③ … 블록)
    - pwProblem: 학생 새 비밀번호 규칙 */
 
@@ -32,8 +32,8 @@ function parseNat(E,text){
   let ok=0;const bad=[];const meta=[];
   const lines=String(text||'').replace(/^﻿/,'').split(/\r?\n/);
   const H={};
-  for(const raw of lines){const h=raw.trim().match(/^[#＃]\s*(정답|배점\s*3\s*점(?:\s*문항)?|3\s*점\s*문항|영역|세트)\s*[:：]\s*(.*)$/);if(!h)continue;
-    const k=h[1].startsWith('정답')?'정답':h[1].startsWith('영역')?'영역':h[1].startsWith('세트')?'세트':'3점';if(!(k in H))H[k]=h[2]}
+  for(const raw of lines){const h=raw.trim().match(/^[#＃]\s*(정답|배점\s*3\s*점(?:\s*문항)?|3\s*점\s*문항|영역|세트|유형)\s*[:：]\s*(.*)$/);if(!h)continue;
+    const k=h[1].startsWith('정답')?'정답':h[1].startsWith('영역')?'영역':h[1].startsWith('세트')?'세트':h[1].startsWith('유형')?'유형':'3점';if(!(k in H))H[k]=h[2]}
   const common=()=>E.items.map((it,i)=>it.el?-1:i).filter(i=>i>=0);
   const byNo=no=>E.items.findIndex(it=>String(it.no)===String(no)&&!it.el);
   // 1) 정답 줄이 먼저: 정답 개수가 곧 문항 수이므로, 선택과목이 없는 시험이면 문항표 길이를 맞춘다.
@@ -48,7 +48,7 @@ function parseNat(E,text){
       const ci=common();ds.split('').forEach((d,k)=>{if(k<ci.length)E.key[ci[k]]=d});
       meta.push('정답 '+ds.length+'개')}}
   if(H['3점']!=null){const ns=H['3점'].match(/\d+/g)||[];if(ns.length){E.items.forEach(it=>{if(!it.el)it.pts=2});let c=0;ns.forEach(n=>{const i=byNo(n);if(i>=0){E.items[i].pts=3;c++}});meta.push('3점 '+c+'문항')}}
-  for(const [k,f,lab] of [['영역','area','영역'],['세트','set','세트']]){if(H[k]==null)continue;let c=0;
+  for(const [k,f,lab] of [['영역','area','영역'],['세트','set','세트'],['유형','type','유형']]){if(H[k]==null)continue;let c=0;
     for(const r of parseRanges(H[k]))E.items.forEach(it=>{const no=parseInt(it.no,10);if(!it.el&&no>=r.a&&no<=r.z){it[f]=r.name;c++}});
     if(c)meta.push(lab+' '+c+'문항')}
   // 2) 전국 정답률 줄: "번호 정답률 ①비율 ②비율 ③비율 ④비율 ⑤비율" (선지 비율은 없어도 됨)

@@ -48,6 +48,12 @@ test('통계 파일(합성): 문항 수가 이미 맞으면 다른 칸은 건드
   assert.equal(E.items.length,7);assert.equal(E.items[0].type,'음운');assert.equal(E.ex[0],'기존 해설');
 });
 
+test('통계 파일(합성): # 유형: 줄을 문항 유형으로 읽고, 줄이 없으면 유형을 건드리지 않는다',()=>{
+  const E=newEdit(45);parseNat(E,SYN_STAT+'# 유형: 1 음운 / 2~3 추론 / 4 <보기> 적용 / 5 내용 이해\n');
+  assert.deepEqual(E.items.map(x=>x.type),['음운','추론','추론','<보기> 적용','내용 이해','','']);
+  const F=newEdit(7);F.items[0].type='기존';parseNat(F,SYN_STAT);assert.equal(F.items[0].type,'기존');
+});
+
 test('통계 파일(합성): 정답이 원문자여도 읽는다',()=>{
   const E=newEdit(45);parseNat(E,'# 정답: ③①⑤②④');assert.equal(E.key.join(''),'31524');assert.equal(E.items.length,5);
 });
@@ -104,6 +110,9 @@ test('실제 차시 파일 15쌍',{skip:have?false:'샘플 폴더 없음: '+DIR}
     // 세트: 세트 줄에 적힌 범위의 문항에만 세트 이름이 붙는다
     const sets=parseRanges(st.match(/^# 세트:\s*(.*)$/m)[1]);assert.ok(sets.length>=1,'세트 1개 이상');
     for(const it of E.items){const s=sets.find(x=>+it.no>=x.a&&+it.no<=x.z);assert.equal(it.set||'',s?s.name:'',`${it.no}번 세트`)}
+    // 유형: # 유형: 줄이 있으면 모든 문항에 유형이 붙는다(줄이 없는 예전 파일은 건너뜀)
+    const ty=st.match(/^# 유형:\s*(.*)$/m);
+    if(ty){const tr=parseRanges(ty[1]);for(const it of E.items){const x=tr.find(q=>+it.no>=q.a&&+it.no<=q.z);assert.ok(it.type,`${it.no}번 유형이 비어 있음`);assert.equal(it.type,x.name,`${it.no}번 유형`)}}
     // TOP15 줄: 모두 읽히고, 값은 0~1, 정답 선지 비율 = 정답률
     assert.equal(r.bad.length,0,'읽지 못한 줄: '+r.bad.join(' | '));
     assert.equal(r.ok,rows.length,'전국 줄 수');
