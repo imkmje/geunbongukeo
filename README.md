@@ -28,3 +28,5 @@
 - 교사 로그인 칸에 `@` 없이 아이디만 적으면 `js/config.js`의 `loginDomain`을 붙인다(예: `kmj` → `kmj@geunbongukeo.local`). 그 주소로 Supabase 교사 계정을 만들어 두면 된다.
 
 `js/vendor/supabase-2.118.0.js`는 [supabase-js](https://github.com/supabase/supabase-js) (MIT) 배포본이다.
+
+아이콘(`icons/`)의 글자는 [Black Han Sans](https://fonts.google.com/specimen/Black+Han+Sans) (SIL Open Font License 1.1) 글자 모양을 도형으로 바꾼 것이다.
