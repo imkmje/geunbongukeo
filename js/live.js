@@ -33,16 +33,15 @@ function viewLive(){
   const stillOpen=lvClasses().filter(c=>!isHiddenCls(c)&&isOpen(t,c));
   if(L.proj&&stillOpen.length)L.proj=false;
   if(L.proj)return viewProjector(t,key,R);// 해설 화면만 그린다(아래 명단의 이름이 화면에 남지 않게)
-  const chip=x=>`<button class="chip" aria-pressed="${x.id===t.id}" data-act="lv-test" data-v="${x.id}">${esc(x.title)}${lvClasses().some(c=>isOpen(x,c))?' <span class="pill open" style="margin-left:4px">응시 중</span>':''}</button>`;
   const others=testList().filter(x=>!open.some(o=>o.id===x.id));
   let h=`<div class="stack"><div class="card"><h3>${open.length?'지금 응시가 열린 시험':'지금 응시가 열린 시험이 없습니다'}</h3>
-    ${open.length?`<div class="chips" role="group" aria-label="응시 중인 시험">${open.map(chip).join('')}</div>`:'<p class="sub">아래에서 시험을 고르고, 오른쪽 위 <b>응시 열기</b>를 누르면 학생 화면에 답안지가 나타납니다.</p>'}
-    ${others.length?`<details class="lv-more" ${open.length?'':'open'}><summary>다른 시험 ${others.length}개</summary><div class="chips" style="margin-top:8px">${others.map(chip).join('')}</div></details>`:''}</div>`;
+    ${open.length?tpGrid(open,t.id,'lv-test','응시 중인 시험'):'<p class="sub">아래에서 시험을 고르고, 오른쪽 위 <b>응시 열기</b>를 누르면 학생 화면에 답안지가 나타납니다.</p>'}
+    ${others.length?`<details class="lv-more tp-more" ${open.length&&!others.some(x=>x.id===t.id)?'':'open'}><summary>다른 시험 ${others.length}개</summary>${tpGrid(others,t.id,'lv-test','다른 시험')}</details>`:''}</div>`;
   const pctDone=M?Math.round(R.done/M*100):0;
   const ocs=lvClasses().filter(c=>!isHiddenCls(c));
   h+=`<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start">
       <div><h2>${esc(t.title)}</h2><p class="sub">${S.cf?esc(S.cf):(classes().length?'보이는 모든 반':'')}${S.cf||classes().length?' · ':''}문항 ${t.items.length}개</p></div>
-      <div class="row" style="gap:6px">${ocs.map(c=>isOpen(t,c)?`<span class="pill open">${esc(c)} 응시 중</span><button class="btn small" data-act="close" data-v="${t.id}|${esc(c)}">응시 닫기</button>`:isRel(t,c)?`<span class="badge good">${esc(c)} 결과 공개됨</span>`:`<button class="btn small" data-act="open" data-v="${t.id}|${esc(c)}">${esc(c)} 응시 열기</button>`).join('')}</div></div>
+      <div class="row" style="gap:6px">${ocs.map(c=>isOpen(t,c)?`<span class="pill open">${esc(c)} 응시 중</span><button class="btn small" data-act="close" data-v="${t.id}|${esc(c)}">응시 닫기</button>`:isRel(t,c)?`<span class="badge good">${esc(c)} 결과 공개됨</span>`:openCtl(t,c)).join('')}</div></div>
     <div class="lv-count" role="status" aria-live="polite"><span class="big num">${R.done}<small>/${M}명</small></span><span class="lbl">제출</span></div>
     <div class="lv-prog" role="progressbar" aria-valuemin="0" aria-valuemax="${M}" aria-valuenow="${R.done}" aria-label="제출한 학생 비율"><i style="width:${pctDone}%"></i></div>
     <div class="row" style="margin-top:12px;justify-content:space-between">
@@ -73,7 +72,7 @@ function viewProjector(t,key,R){
     return `<div class="pj-item"><div class="pj-no">${esc(x.no)}</div>
       <div class="pj-main"><div class="pj-rate ${tone(x.wrongRate)}"><span class="pj-pct">${rate(x.wrongRate)}</span><span class="pj-lbl">오답률</span></div>
         <div class="pj-bar"><i class="${tone(x.wrongRate)}" style="width:${x.wrongRate==null?0:Math.max(1,Math.round(x.wrongRate*100))}%"></i></div>
-        <div class="pj-top">${x.top?`가장 많이 고른 오답 <b>${CIR[x.top.opt]}</b> ${rate(x.top.share)}`:(x.n?(x.wrong?`비운 학생 ${rate(x.blank)}`:'오답을 고른 학생 없음'):'아직 답 없음')}${L.showKey&&x.ans?` <span class="pj-key">정답 ${CIR[+x.ans]}</span>`:''}</div></div>
+        <div class="pj-top">${x.top?`<span class="pj-tw">많이 고른 오답 <b>${CIR[x.top.opt]}</b> ${rate(x.top.share)}</span>`:(x.n?(x.wrong?`비운 학생 ${rate(x.blank)}`:'오답을 고른 학생 없음'):'아직 답 없음')}${L.showKey&&x.ans?` <span class="pj-key">정답 ${CIR[+x.ans]}</span>`:''}</div></div>
       <div class="pj-dist" aria-label="선지별 비율">${dist}</div></div>`;
   };
   return `<div class="proj" role="dialog" aria-modal="true" aria-label="해설 화면">

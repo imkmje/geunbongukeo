@@ -73,3 +73,26 @@ test('신청시간(날짜)이 있는 줄의 4자리 학번 오타도 고칠 줄�
   assert.deepEqual(P.errors.map(x=>x.line),[2]);
   assert.deepEqual(P.skipped.map(x=>x.line),[1,3],'머리글·날짜만 있는 줄은 건너뜀');
 });
+
+const {rosterName}=require('../js/logic.js');
+test('이름 규칙: 한글·영문·띄어쓰기·가운뎃점·붙임표, 2~30자',()=>{
+  const P=rosterPlan(['순번\t학번\t이름',
+    '1\t20111\t마리아 로페즈\t2026-09-16',  // 칸이 나뉜 줄: 띄어 쓴 이름 통째로
+    '20112 Kim Minsu',                         // 로마자 이름은 이어지는 로마자 낱말까지
+    '20113 가나다 신청완료',                    // 띄어쓰기 줄의 한글 이름은 예전처럼 첫 낱말만
+    '20114\tAnne-Marie Dupont',
+    '20115\t왕·리우',
+    '20116 José Núñez 2026-09-16',
+    '20117 가나다(전학)',
+    '20118\t가나다#',
+    '20119\t가',
+    '20120\t'+'가'.repeat(31),
+    '20121\t'+'가'.repeat(30)].join('\n'),'화목반',[]);
+  assert.deepEqual(P.add.map(x=>[x.sid,x.name]),[['20111','마리아 로페즈'],['20112','Kim Minsu'],['20113','가나다'],['20114','Anne-Marie Dupont'],['20115','왕·리우'],['20116','José Núñez'],['20117','가나다'],['20121','가'.repeat(30)]]);
+  assert.deepEqual(P.errors.map(e=>[e.line,e.msg.slice(0,6)]),[[9,'이름에는 한'],[10,'이름은 2자'],[11,'이름이 너무']]);
+  assert.deepEqual(P.skipped.map(x=>x.line),[1],'머리글 줄은 그대로 건너뜀');
+  assert.equal(rosterName(' 김하늘 ',false).name,'김하늘');
+  assert.equal(rosterName('  ',false).err,'학번 뒤에 이름이 없습니다');
+  assert.equal(rosterName('Lee  Ji-ho',false).name,'Lee Ji-ho','띄어쓰기는 하나로');
+  assert.equal(rosterName('왕・리우',true).name,'왕·리우','일본식 가운뎃점은 ·로 바꾼다');
+});

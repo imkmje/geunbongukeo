@@ -19,11 +19,30 @@ async function unlockStu(uid){
   if(S.demo){toast('예시 데이터에서는 바꾸지 않습니다');return}
   const s=stu(uid);const r=await sb.rpc('teacher_unlock_student',{p_student:uid});
   if(r.error){const missing=r.error.code==='PGRST202'||/teacher_unlock_student|function|schema cache/i.test(r.error.message||'');
-    toast(missing?'잠금만 풀기는 서버 준비가 필요합니다. Supabase SQL Editor에서 supabase/migrations/2026-11-ux-state.sql을 실행해 주세요. 지금은 비밀번호 초기화로도 잠금이 풀립니다':'잠금을 풀지 못했습니다: '+r.error.message);return}
+    toast(missing?UNLOCK_MISSING:'잠금을 풀지 못했습니다: '+r.error.message);return}
   if(!r.data?.ok){toast('잠금을 풀지 못했습니다: 명단에서 학생을 찾지 못했습니다');return}
   await load();render();toast((s?who(s):'학생')+'의 잠금을 풀었습니다. 비밀번호는 그대로입니다');
 }
 const who=s=>`${s.name}(${s.sid})`;
+const UNLOCK_MISSING='잠금만 풀기는 서버 준비가 필요합니다. Supabase SQL Editor에서 supabase/migrations/2026-11-ux-state.sql을 실행해 주세요. 지금은 비밀번호 초기화로도 잠금이 풀립니다';
+/* 이 반 잠긴 학생 모두: 같은 teacher_unlock_student를 4명씩 나눠 부른다(진행 표시 → 결과 한 줄). 함수가 없으면 바로 멈추고 안내. */
+async function unlockAll(c){
+  const M=MG();if(S.demo){toast('예시 데이터에서는 바꾸지 않습니다');M.unlockAsk=false;render();return}
+  const L=mgStudents().filter(s=>s.cls===c&&s.locked);M.unlockAsk=false;if(!L.length){render();return}
+  M.unlockBusy={done:0,total:L.length};render();
+  let ok=0,missing=false;const fail=[];
+  for(let i=0;i<L.length&&!missing;i+=4){
+    await Promise.all(L.slice(i,i+4).map(async s=>{
+      try{const r=await sb.rpc('teacher_unlock_student',{p_student:s.uid});
+        if(r.error){if(r.error.code==='PGRST202'||/teacher_unlock_student|function|schema cache/i.test(r.error.message||''))missing=true;else fail.push(s)}
+        else if(r.data?.ok)ok++;else fail.push(s)}catch(e){fail.push(s)}
+      M.unlockBusy.done++;const el=document.getElementById('mgUnlockProg');if(el)el.textContent=`잠금 푸는 중 ${M.unlockBusy.done}/${L.length}명…`}));
+  }
+  M.unlockBusy=null;
+  if(missing&&!ok){render();toast(UNLOCK_MISSING);return}
+  M.unlockMsg=`${ok}명 잠금 해제`+(fail.length?`, ${fail.length}명은 풀지 못함(${fail.map(x=>x.sid).join(', ')})`:'')+(missing?' · '+UNLOCK_MISSING:'');
+  try{await load()}catch(e){}render();toast(M.unlockMsg);
+}
 
 /* ---------- 확인 상자 (Esc·취소 = 아니오) ----------
    돌려주는 값: true(ok 버튼) / false(취소·Esc). alt를 주면 버튼이 하나 더 생기고, 그것을 누르면 'alt'. */
@@ -64,6 +83,9 @@ function viewOneClass(c,list){
     ${hid?`<p class="note" style="margin-top:10px"><span class="badge">숨김</span> 수업이 끝나 숨긴 반입니다. 이 반 학생은 로그인할 수 없고, 시험 응시도 열 수 없습니다. 답안과 결과 기록은 그대로 남아 있어서, 반 분석·누적 추이에서 <b>숨긴 반 보기</b>를 켜면 볼 수 있습니다.</p>`:''}
     ${M.panel==='rename'?`<form id="mgRenameForm" class="row mg-inline" style="margin-top:10px"><label class="f" style="flex:1;min-width:160px">새 이름<input type="text" id="mgRename" maxlength="40" value="${esc(c)}" required></label><button class="btn primary" type="submit">이름 저장</button><button class="btn ghost" type="button" data-act="mg-panel" data-v="">취소</button></form>`:''}
     <div class="mg-tiles" role="group" aria-label="비밀번호 상태로 거르기">${tile('all','학생','')}${tile('must','아직 학번 그대로','warn')}${tile('own','직접 정함','good')}${tile('locked','잠김','bad')}</div>
+    ${n.locked&&!hid||M.unlockBusy||M.unlockMsg?`<div class="mg-unlock" role="status">${M.unlockBusy?`<span id="mgUnlockProg" class="sub"><b>잠금 푸는 중 ${M.unlockBusy.done}/${M.unlockBusy.total}명…</b></span>`
+      :M.unlockAsk?`<span class="confirm" role="alert">잠긴 학생 ${n.locked}명의 잠금을 풉니다. 비밀번호는 그대로입니다. <span class="row" style="gap:6px"><button class="btn small primary" data-act="mg-unlock-all-yes">모두 풀기</button><button class="btn small" data-act="mg-unlock-all-no">취소</button></span></span>`
+      :`${n.locked&&!hid?`<button class="btn small primary" data-act="mg-unlock-all">이 반 잠금 모두 풀기 (${n.locked}명)</button>`:''}${M.unlockMsg?` <span class="sub">${esc(M.unlockMsg)}</span>`:''}`}</div>`:''}
     <p class="sub" style="margin-top:8px">학생은 학번과 비밀번호로 로그인합니다. 처음 비밀번호는 <b>학번</b>이고, 처음 로그인하면 새 비밀번호를 정해야 시험을 볼 수 있습니다. 칸을 누르면 그 상태의 학생만 보입니다.</p>
     ${hid?'':`<div class="row" style="margin-top:12px"><button class="btn primary" data-act="mg-panel" data-v="paste" aria-expanded="${M.panel==='paste'}">명단 붙여넣기</button><button class="btn" data-act="mg-panel" data-v="add" aria-expanded="${M.panel==='add'}">학생 한 명 추가</button></div>`}
     ${M.panel==='paste'?pastePanel(c):''}${M.panel==='add'?addPanel():''}
@@ -90,7 +112,7 @@ function studentTable(rows,total,actions){
 function pastePanel(c){
   const M=MG();const P=M.plan;
   let h=`<div class="mg-panel"><h3>명단 붙여넣기 · ${esc(c)}</h3>
-   <p class="sub">한 줄에 한 명씩, <b>5자리 학번 뒤에 이름</b>을 적습니다. 예: <span class="mono">20315 김하늘</span><br>수강생 표를 통째로 복사해 붙여넣어도 됩니다. 순번·신청시간·머리글 줄은 알아서 건너뜁니다.</p>
+   <p class="sub">한 줄에 한 명씩, <b>5자리 학번 뒤에 이름</b>을 적습니다. 예: <span class="mono">20315 김하늘</span><br>이름에는 한글·영문·띄어쓰기·가운뎃점(·)·붙임표(-)를 쓸 수 있습니다(30자까지). 띄어 쓴 이름(예: 마리아 로페즈)은 엑셀 표처럼 칸을 나눠 붙여넣거나 '학생 한 명 추가' 버튼으로 넣으세요.<br>수강생 표를 통째로 복사해 붙여넣어도 됩니다. 순번·신청시간·머리글 줄은 알아서 건너뜁니다.</p>
    <label class="f" style="margin-top:8px"><span class="sr">명단</span><textarea id="rosterText" rows="7" placeholder="20315 김하늘&#10;20316 이바다">${esc(M.text)}</textarea></label>
    <div class="row" style="margin-top:8px"><button class="btn" data-act="mg-plan">미리 보기</button><button class="btn ghost" data-act="mg-panel" data-v="">닫기</button></div>`;
   if(!P)return h+'</div>';
@@ -139,11 +161,14 @@ document.addEventListener('click',async e=>{
   const b=e.target.closest('[data-act^="mg-"]');if(!b)return;
   const M=MG();const v=b.dataset.v;
   switch(b.dataset.act){
-    case 'mg-cls':M.cls=v;M.q='';M.f='all';M.plan=null;M.drop=false;if(M.panel!=='new')M.panel=null;lsSet('gb-mg-cls',v);render();break;
+    case 'mg-cls':M.cls=v;M.q='';M.f='all';M.plan=null;M.drop=false;M.unlockAsk=false;M.unlockMsg='';if(M.panel!=='new')M.panel=null;lsSet('gb-mg-cls',v);render();break;
     case 'mg-f':M.f=v;render();break;
     case 'mg-panel':M.panel=M.panel===v?null:(v||null);render();{const f={new:'#mgNewName',rename:'#mgRename',paste:'#rosterText',add:'#mgAddSid'}[M.panel];if(f)$(f)?.focus()}break;
     case 'mg-plan':M.text=$('#rosterText').value;M.plan=rosterPlan(M.text,M.cls,mgStudents());M.drop=false;render();break;
     case 'mg-save':await savePlan();break;
+    case 'mg-unlock-all':MG().unlockAsk=true;MG().unlockMsg='';render();break;
+    case 'mg-unlock-all-no':MG().unlockAsk=false;render();break;
+    case 'mg-unlock-all-yes':await unlockAll(MG().cls);break;
     case 'mg-unlock':{const s=stu(v);if(!s)break;if(await ask({title:'잠금만 풀기',msg:`${who(s)} 학생의 잠금을 풉니다. 비밀번호는 바뀌지 않으니 학생은 원래 비밀번호로 바로 로그인할 수 있습니다. (다른 학생이 일부러 틀려서 잠근 경우에 쓰세요)`,ok:'잠금 풀기'}))await unlockStu(v);break}
     case 'mg-reset':{const s=stu(v);if(!s)break;if(await ask({title:'비밀번호 초기화',msg:`${who(s)} 학생의 비밀번호를 학번으로 되돌립니다. 잠금도 풀리고, 지금 로그인해 있으면 로그아웃됩니다.`,ok:'초기화',danger:true}))await resetPw(v);break}
     case 'mg-out':{const s=stu(v);if(!s)break;if(await ask({title:'반에서 빼기',msg:`${who(s)} 학생을 ${s.cls}에서 뺍니다. 답안 기록은 남지만, 다시 반에 넣기 전에는 시험을 볼 수 없습니다.`,ok:'반에서 빼기',danger:true}))await api(async()=>chk(await sb.from('students').update({class_id:null}).eq('id',v)),`${s.name} 학생을 반에서 뺐습니다`);break}
@@ -179,8 +204,8 @@ document.addEventListener('submit',async e=>{
     const ok=await api(async()=>chk(await sb.from('classes').update({name:n}).eq('id',clsId(old))),`반 이름을 '${n}'(으)로 바꿨습니다`);
     if(ok){M.cls=n;M.panel=null;if(S.cf===old){S.cf=n;lsSet('omr-cf',n)}lsSet('gb-mg-cls',n);render()}}
   if(f.id==='mgAddForm'){e.preventDefault();const sid=$('#mgAddSid').value.trim(),name=normName($('#mgAddName').value);
-    const P=rosterPlan(sid+' '+name,M.cls,mgStudents());
-    if(P.errors.length||!(P.add.length+P.move.length+P.rename.length+P.same.length)){toast(P.errors[0]?.msg||'학번 5자리와 한글 이름을 적어 주세요');return}
+    const P=rosterPlan(sid+'\t'+name,M.cls,mgStudents());// 탭으로 이어 '마리아 로페즈'처럼 띄어 쓴 이름도 통째로
+    if(P.errors.length||!(P.add.length+P.move.length+P.rename.length+P.same.length)){toast(P.errors[0]?.msg||'학번 5자리와 이름을 적어 주세요');return}
     if(P.same.length){toast('이미 이 반에 있는 학생입니다');return}
     const m=P.move[0];if(m&&!await ask({title:'다른 반에 있는 학번',msg:`${m.sid}은(는) 지금 ${m.from||'반 없음'}의 ${m.oldName} 학생입니다. ${M.cls}(으)로 옮길까요?`,ok:'옮기기'}))return;
     M.plan=P;M.drop=false;await savePlan()}

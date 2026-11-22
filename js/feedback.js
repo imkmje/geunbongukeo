@@ -2,7 +2,8 @@
 /* 근본국어 교사 화면: 선생님 한마디 · 틀린 문항 다시 풀기 · 정답·해설 공개 단계.
    teacher.js보다 먼저 불러온다. S·sb·api 같은 teacher.js 값은 함수 안에서만 쓴다.
    수업 흐름(반마다): 응시 → 결과 공개(점수·O/X) → 학생 다시 풀기 → 설명 수업 → 정답·해설 공개 */
-const FR={fb:{},rt:{},kr:new Set(),draft:{},saving:{},done:{},fail:{},flash:null,pend:null,open:null,err:null,auto:{tid:null,at:0,busy:false,sig:'',err:''}};
+const FR_PAGE=30;
+const FR={stExp:null,tf:{cls:'',q:'',n:30},fb:{},rt:{},kr:new Set(),draft:{},saving:{},done:{},fail:{},flash:null,pend:null,open:null,err:null,auto:{tid:null,at:0,busy:false,sig:'',err:''}};
 // 열쇠: 한마디 (시험id|학번), 누적 코멘트는 (|학번). 다시 풀기 (시험id|학번). 정답 공개 (시험id|반 이름)
 
 /* load()가 부른다: feedback·retries·정답 공개 여부를 읽는다. 표가 아직 없으면(스키마를 다시 실행하기 전) 안내만 한다. */
@@ -32,8 +33,16 @@ function frStagePanel(t,keyMissing){
   const cs=S.cf?[S.cf]:liveClasses();
   if(!cs.length)return `<p class="note" style="margin-top:12px">반을 만들면 반마다 결과 공개 → 다시 풀기 → 정답·해설 공개를 진행할 수 있습니다. <button class="btn small" data-act="tab" data-v="classes">반 관리</button></p>`;
   const key=keyOf(t.id);
-  return `<div class="stage-list">${cs.map(c=>{
-    const rel=isRel(t,c),kr=rel&&frKeyRel(t.id,c),open=isOpen(t,c),closed=isClosed(t,c);const rs=recordsFor(t.id,c);const pg=frProgress(t.id,key,rs);
+  // '전체'에서 반이 여럿이면 반마다 한 줄 요약(반 · 단계 · 제출/다시 풀기)만 보이고, 누르면 그 반의 단계·버튼이 펼쳐진다. 맨 위에 '모든 반 한꺼번에'.
+  const compact=!S.cf&&cs.length>1;
+  const mini=c=>{const rel=isRel(t,c),kr=rel&&frKeyRel(t.id,c),open=isOpen(t,c),closed=isClosed(t,c);const rs=recordsFor(t.id,c);
+    const SS=subStatus(t,[c]);const pg=frProgress(t.id,key,rs);
+    const [cl,st]=isHiddenCls(c)?['draft','숨긴 반']:kr?['rel','정답·해설 공개됨']:rel?['rel','결과 공개됨']:open?['open','응시 중']:closed?['closed','마감']:['draft','준비 중'];
+    const info=rel&&!kr?`다시 풀기 ${pg.done}/${pg.due}명`:SS.m?`제출 ${SS.n}/${SS.m}명`:rs.length?`답안 ${rs.length}개`:'';
+    const exp=FR.stExp===c;
+    return `<button class="stage-mini${exp?' on':''}" data-act="fr-st-exp" data-v="${esc(c)}" aria-expanded="${exp}"><b>${esc(c)}</b><span class="pill ${cl}">${st}</span><span class="sub">${info}</span><span class="stage-mini-go" aria-hidden="true">${exp?'▴':'▾'}</span></button>`};
+  const full=c=>{
+      const rel=isRel(t,c),kr=rel&&frKeyRel(t.id,c),open=isOpen(t,c),closed=isClosed(t,c);const rs=recordsFor(t.id,c);const pg=frProgress(t.id,key,rs);
     const steps=stageSteps({open,rel,kr,closed,...pg});const v=esc(t.id+'|'+c);
     // 결과 공개는 낸 답안이 있어야 누를 수 있다(한 번도 안 연 반·아무도 안 낸 반은 공개할 것이 없다).
     const noRel=keyMissing?'정답을 모두 입력해야 공개할 수 있습니다':!rs.length?(open||closed?'이 반에 낸 답안이 아직 없습니다':'이 반은 아직 응시를 연 적이 없습니다'):'';
@@ -42,7 +51,9 @@ function frStagePanel(t,keyMissing){
     const btns=isHiddenCls(c)?'<span class="badge">숨긴 반</span>':!rel?`<button class="btn red small" data-act="fr-release" data-v="${v}" ${noRel?`disabled title="${esc(noRel)}"`:''}>결과 공개</button>${noRel&&!keyMissing?`<span class="sub">${esc(noRel)}</span>`:''}`
       :!kr?`<button class="btn primary small" data-act="fr-key" data-v="${v}">정답·해설 공개</button>${undo}`
       :`<span class="badge good">정답·해설 공개됨</span>${undo}`;
-    return `<div class="stage-row">${c?`<b class="stage-cls">${esc(c)}</b>`:''}<ol class="stage">${steps.map((s,i)=>`<li class="st-${s.state}"><span class="st-n">${s.state==='done'?'✓':i+1}</span>${esc(s.label)}</li>`).join('')}</ol><div class="row stage-btns">${btns}</div></div>`}).join('')}</div>${frNowLine(t)}${frMissing()}`;
+    return `<div class="stage-row">${c?`<b class="stage-cls">${esc(c)}</b>`:''}<ol class="stage">${steps.map((s,i)=>`<li class="st-${s.state}"><span class="st-n">${s.state==='done'?'✓':i+1}</span>${esc(s.label)}</li>`).join('')}</ol><div class="row stage-btns">${btns}</div></div>`};
+  if(compact)return `${frNowLine(t)}<div class="stage-compact">${bulkBar(t)}<div class="stage-minis" role="group" aria-label="반마다 단계">${cs.map(c=>mini(c)+(FR.stExp===c?full(c):'')).join('')}</div></div>${frMissing()}`;
+  return `<div class="stage-list">${cs.map(full).join('')}</div>${frNowLine(t)}${frMissing()}`;
 }
 
 /* ----- 반 분석 맨 위 '지금 할 일' 한 줄 (B1) ----- */
@@ -118,12 +129,26 @@ function frClassCards(t,recs,key){
   const nFb=recs.filter(r=>FR.fb[t.id+'|'+frSid(r)]).length;
   h+=`<div class="card" id="frStuTbl"><div class="row" style="justify-content:space-between"><h3 style="margin:0">학생별 한마디 · 다시 풀기</h3><span class="badge">한마디 ${nFb}/${recs.length}명</span></div>
    <p class="sub" style="margin:6px 0 10px">한마디는 학생 결과 화면의 '선생님 한마디'에 보이며, 그 반에 정답·해설을 공개한 뒤에 열립니다. 재도전은 '다시 풀어 맞힌 수 / 다시 푼 문항 수'입니다.</p>
-   <div class="tbl-wrap"><table class="fb-tbl"><thead><tr><th>학생</th><th class="n">점수</th><th class="n">틀린 수</th><th>재도전</th><th>한마디</th><th></th></tr></thead><tbody>${recs.map(r=>{
+   ${frTblFilter(recs)}
+   <div class="tbl-wrap"><table class="fb-tbl"><thead><tr><th>학생</th><th class="n">점수</th><th class="n">틀린 수</th><th>재도전</th><th>한마디</th><th></th></tr></thead><tbody>${frTblRows(recs).shown.map(r=>{
      const sid=frSid(r);const g=grade(t,key,r);const tg=frTargets(key,r.a);const rr=FR.rt[t.id+'|'+sid];const o=rr?frRetrySplit(key,rr.answers):null;const fb=FR.fb[t.id+'|'+sid];const dr=FR.draft[t.id+'|'+sid];
      const rt=!tg.length?'<span class="muted">–</span>':!rr?'<span class="muted">아직</span>':`<b class="num">${o.fixed.length}/${o.targets.length}</b> 맞힘${o.blank.length?` <span class="muted">· ${o.blank.length} 비움</span>`:''}`;
      const open=FR.open===sid;
-     return `<tr${open?' class="fb-open"':''}><td class="nm">${esc(r.name)}${r.cls&&!S.cf?` <span class="muted">${esc(r.cls)}</span>`:''}</td><td class="n">${g.score}/${g.max}</td><td class="n">${tg.length}</td><td>${rt}</td><td class="fb-prev">${dr!=null&&fbClean(dr)!==(fb?.body||'')?'<span class="badge warn">저장 안 됨</span> ':''}${fb?esc(fb.body.length>40?fb.body.slice(0,40)+'…':fb.body):'<span class="muted">없음</span>'}</td><td><button class="btn small${open?' primary':''}" data-act="fr-open" data-v="${esc(sid)}" aria-expanded="${open}">${open?'닫기':fb?'고치기':'쓰기'}</button></td></tr>${open?`<tr class="fb-edrow"><td colspan="6">${frPendBox()}${fbEditor(t.id,sid,{next:true,label:r.name,locked:isAnonCls(r.cls)})}</td></tr>`:''}`}).join('')}</tbody></table></div>${frMissing()}</div>`;
+     return `<tr${open?' class="fb-open"':''}><td class="nm">${esc(r.name)}${r.cls&&!S.cf?` <span class="muted">${esc(r.cls)}</span>`:''}</td><td class="n">${g.score}/${g.max}</td><td class="n">${tg.length}</td><td>${rt}</td><td class="fb-prev">${dr!=null&&fbClean(dr)!==(fb?.body||'')?'<span class="badge warn">저장 안 됨</span> ':''}${fb?esc(fb.body.length>40?fb.body.slice(0,40)+'…':fb.body):'<span class="muted">없음</span>'}</td><td><button class="btn small${open?' primary':''}" data-act="fr-open" data-v="${esc(sid)}" aria-expanded="${open}">${open?'닫기':fb?'고치기':'쓰기'}</button></td></tr>${open?`<tr class="fb-edrow"><td colspan="6">${frPendBox()}${fbEditor(t.id,sid,{next:true,label:r.name,locked:isAnonCls(r.cls)})}</td></tr>`:''}`}).join('')}</tbody></table></div>${(()=>{const T=frTblRows(recs);return T.rest?`<div class="row" style="margin-top:8px"><button class="btn" data-act="fr-tmore">더 보기 (${Math.min(FR_PAGE,T.rest)}명 더 · 남은 ${T.rest}명)</button></div>`:''})()}${frMissing()}</div>`;
   return h;
+}
+
+/* 학생별 표 거르기: 반(전체일 때만) + 학번·이름 찾기 + 30명씩 '더 보기'. 입력 칸을 연 학생은 늘 보이게 한다. */
+function frTblRows(recs){
+  const F=FR.tf;const q=F.q.trim();
+  const L=recs.filter(r=>(!F.cls||S.cf||r.cls===F.cls)&&(!q||r.name.includes(q)));
+  let n=Math.max(FR_PAGE,F.n);const oi=FR.open?L.findIndex(r=>frSid(r)===FR.open):-1;if(oi>=n)n=oi+1;
+  return {all:L,shown:L.slice(0,n),rest:Math.max(0,L.length-n)};
+}
+function frTblFilter(recs){
+  if(recs.length<=FR_PAGE&&!FR.tf.q&&!FR.tf.cls)return '';
+  const cs=[...new Set(recs.map(r=>r.cls).filter(Boolean))];const T=frTblRows(recs);
+  return `<div class="row fr-tf" style="margin-bottom:8px">${!S.cf&&cs.length>1?`<label class="f">반<select id="frTcls"><option value="">모든 반</option>${cs.map(c=>`<option ${c===FR.tf.cls?'selected':''}>${esc(c)}</option>`).join('')}</select></label>`:''}<label class="f" style="flex:1;min-width:160px;max-width:280px">학번·이름 찾기<input type="search" id="frTq" value="${esc(FR.tf.q)}" placeholder="예: 20315 또는 김하늘" autocomplete="off"></label><span class="sub" style="align-self:flex-end">${T.all.length}명 중 ${T.shown.length}명 보임</span></div>`;
 }
 
 /* ----- 한마디 입력 칸 ----- */
@@ -168,8 +193,6 @@ function frStudentCards(t,rec,recs,key){
   const sid=frSid(rec);const kr=rec.cls?frKeyRel(t.id,rec.cls):false;const rel=rec.cls?isRel(t,rec.cls):false;
   const nFb=recs.filter(r=>FR.fb[t.id+'|'+frSid(r)]).length;
   const when=!rel?'이 반은 아직 결과를 공개하지 않았습니다. 정답·해설을 공개한 뒤에 학생에게 보입니다.':!kr?'이 반은 아직 정답·해설 공개 전이라 학생에게 보이지 않습니다. 정답·해설을 공개하면 보입니다.':'이 반은 정답·해설을 공개해서 학생 결과 화면에 바로 보입니다.';
-  const chips=recs.map(r=>{const s=frSid(r);const has=!!FR.fb[t.id+'|'+s];const d=FR.draft[t.id+'|'+s];const dirty=d!=null&&fbClean(d)!==(FR.fb[t.id+'|'+s]?.body||'');
-    return `<button class="chip fb-chip${has?' has':''}" aria-pressed="${r.name===rec.name}" data-act="fr-pick" data-v="${esc(r.name)}" title="${has?'한마디 있음':'한마디 없음'}">${has?'✓ ':''}${esc(r.name)}${dirty?' •':''}</button>`}).join('');
   // 다시 풀기
   const tg=frTargets(key,rec.a);const rr=FR.rt[t.id+'|'+sid];let rtH;
   if(!tg.length)rtH='<p class="muted">모두 맞혀 다시 풀 문항이 없습니다.</p>';
@@ -181,7 +204,6 @@ function frStudentCards(t,rec,recs,key){
   const locked=isAnonCls(rec.cls);
   return `<div class="grid2"><div class="card"><div class="row" style="justify-content:space-between"><h3 class="h-tag" style="margin:0">선생님 한마디 <span class="vis-tag">학생 결과 화면에 보임(정답·해설 공개 뒤)</span></h3><span class="badge">이 시험 ${nFb}/${recs.length}명 작성</span></div>
    <p class="sub" style="margin:6px 0 8px">${when} ${FB_MAX}자까지 적을 수 있고, 비우고 저장하면 지워집니다.</p>
-   <div class="chips fb-chips" role="group" aria-label="학생 고르기 (✓ 한마디 있음, • 저장 안 됨)">${chips}</div>
    ${frPendBox()}${fbEditor(t.id,sid,{next:true,label:rec.name,locked})}
    <h3 class="h-tag" style="margin:16px 0 4px">누적 코멘트 <span class="vis-tag">학생 '내 누적 기록' 맨 위에 보임</span></h3><p class="sub" style="margin-bottom:8px">시험과 상관없이 이 학생에게 남기는 말입니다. 저장하면 바로 보입니다.</p>
    ${fbEditor('',sid,{label:rec.name,locked})}${frMissing()}</div>
@@ -257,6 +279,8 @@ document.addEventListener('click',async e=>{
     case 'fr-pend-save':{const P=FR.pend;if(!P)break;let ok=true;for(const k of frDirtyKeys(S.selTest,P.from))ok=(await fbSave(k))&&ok;if(ok)frGo(P.kind,P.to);else render();break}
     case 'fr-pend-skip':{const P=FR.pend;if(!P)break;for(const k of frDirtyKeys(S.selTest,P.from)){delete FR.draft[k];delete FR.fail[k]}frGo(P.kind,P.to);break}
     case 'fr-pend-cancel':FR.pend=null;render();break;
+    case 'fr-st-exp':FR.stExp=FR.stExp===v?null:v;render();break;
+    case 'fr-tmore':FR.tf.n+=FR_PAGE;render();break;
     case 'fr-jump':document.getElementById(v)?.scrollIntoView({block:'start',behavior:'smooth'});break;
     case 'tab':if(v==='class')setTimeout(()=>{if(frAutoActive())frAutoRefresh()},0);break;
     case 'fr-release':case 'fr-key':case 'fr-key-undo':case 'fr-unrelease':await frStage(act,v);break;
@@ -266,6 +290,8 @@ document.addEventListener('click',async e=>{
       await api(async()=>chk(await sb.from('retries').delete().eq('test_id',tid).eq('student_id',st.id)),'다시 풀기 기록을 지웠습니다');break}
   }
 });
+document.addEventListener('input',e=>{const el=e.target;if(el.id==='frTq'){FR.tf.q=el.value;FR.tf.n=FR_PAGE;const p=el.selectionStart;render();const n=document.getElementById('frTq');if(n){n.focus();n.setSelectionRange(p,p)}}});
+document.addEventListener('change',e=>{const el=e.target;if(el.id==='frTcls'){FR.tf.cls=el.value;FR.tf.n=FR_PAGE;render()}});
 document.addEventListener('input',e=>{const el=e.target;if(!el.classList?.contains('fb-text'))return;const k=el.dataset.fbk;FR.draft[k]=el.value;delete FR.fail[k];delete FR.done[k];fbPaint(k)});
 document.addEventListener('keydown',e=>{const el=e.target;if(!el.classList?.contains('fb-text')||e.key!=='Enter'||!(e.ctrlKey||e.metaKey))return;e.preventDefault();
   const box=el.closest('.fb-ed');const btn=box?.querySelector('[data-act="fb-next"]')||box?.querySelector('[data-act="fb-save"]');btn?.click()});

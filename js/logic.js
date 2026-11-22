@@ -87,6 +87,28 @@ function parseEx(E,text){
    text: 붙여넣은 글, cls: 이 반 이름, students: 지금 학생 [{uid,sid,name,cls}] (cls ''=반 없음)
    돌려주는 값: add(새 학생) / move(다른 반·반 없음에서 옮겨 옴) / rename(이름만 바뀜) / same(그대로)
                / errors(고쳐야 하는 줄, 줄 번호 포함) / skipped(학번이 없어 건너뛴 줄: 머리글 등) / missing(이 반인데 붙여넣은 글에 없는 학생) */
+/* 학번 뒤의 이름 읽기. 이름에 쓸 수 있는 글자: 한글, 로마자(é 같은 글자 포함), 띄어쓰기, 가운뎃점(·), 붙임표(-). 2~30자(서버는 1~30자).
+   after: 학번 바로 뒤 글, fielded: 줄이 탭·쉼표·| 로 칸이 나뉘어 있는지(엑셀에서 복사한 명단).
+   - 칸이 나뉜 줄: 학번 다음 칸 전체가 이름('마리아 로페즈'처럼 띄어 쓴 이름도 됨).
+   - 띄어쓰기로만 적은 줄: 한글 이름은 첫 낱말만(예전과 같음: '20101 김하늘 신청완료' → 김하늘), 로마자 이름은 이어지는 로마자 낱말까지('20101 Kim Minsu').
+   어느 쪽이든 숫자(신청 날짜 등)가 나오면 거기서 끝난다. 돌려주는 값 {name} 또는 {err} */
+const NAME_MAX=30;
+const NAME_RE=/^[가-힣\p{Script=Latin}](?:[가-힣\p{Script=Latin} ·\-]*[가-힣\p{Script=Latin}])?$/u;
+function rosterName(after,fielded){
+  let s=String(after||'').replace(/^[\s,\t|]+/,'');
+  if(fielded)s=s.split(/[\t,|]/)[0];
+  s=s.split(/[\d(\[]/)[0].replace(/[・‧]/g,'·').replace(/\s+/g,' ').trim();// 숫자(날짜)·괄호 메모('김하늘(전학)')에서 끝
+  if(!fielded){
+    const h=s.match(/^[가-힣]+(?:·[가-힣]+)*/);
+    if(h)s=h[0];
+    else{const w=s.split(' ');const k=w.findIndex(x=>!/^[\p{Script=Latin}·\-]+$/u.test(x));s=(k<0?w:w.slice(0,k)).join(' ')}
+  }
+  if(!s)return {err:'학번 뒤에 이름이 없습니다'};
+  if(!NAME_RE.test(s))return {err:'이름에는 한글·영문·띄어쓰기·가운뎃점(·)·붙임표(-)만 쓸 수 있습니다'};
+  if([...s].length<2)return {err:'이름은 2자 이상이어야 합니다'};
+  if([...s].length>NAME_MAX)return {err:`이름이 너무 깁니다(${NAME_MAX}자까지)`};
+  return {name:s};
+}
 function rosterPlan(text,cls,students){
   const P={add:[],move:[],rename:[],same:[],errors:[],skipped:[],missing:[]};
   const bySid={};for(const s of students||[])bySid[s.sid]=s;
@@ -102,11 +124,11 @@ function rosterPlan(text,cls,students){
       else P.skipped.push({line:no,text:short});
       return}
     const sid=m[1];const after=line.slice(m.index+m[0].length);
-    const nm=after.match(/^[\s,\t|]*([가-힣]{2,10})(?![가-힣])/);
-    if(!nm){P.errors.push({line:no,text:short,msg:'학번 뒤에 이름(한글 2~10자)이 없습니다'});return}
+    const nr=rosterName(after,/[\t,|]/.test(line));
+    if(nr.err){P.errors.push({line:no,text:short,msg:nr.err});return}
     if(seen[sid]){P.errors.push({line:no,text:short,msg:`학번 ${sid}이(가) ${seen[sid]}번째 줄에도 있습니다`});return}
     seen[sid]=no;
-    const name=nm[1];const ex=bySid[sid];const row={line:no,sid,name};
+    const name=nr.name;const ex=bySid[sid];const row={line:no,sid,name};
     if(!ex)P.add.push(row);
     else if((ex.cls||'')!==cls)P.move.push({...row,uid:ex.uid,from:ex.cls||'',oldName:ex.name});
     else if(ex.name!==name)P.rename.push({...row,uid:ex.uid,oldName:ex.name});
@@ -183,4 +205,4 @@ function itemDisc(graded,n){
   return out;
 }
 
-if(typeof module!=='undefined'&&module.exports)module.exports={sessionLabel,testOrder,visibleClasses,loginErrorMsg,rosterPlan,parseNat,parseEx,parseRanges,pwProblem,PW_MIN,EX_MAX,explainPriority,DISC_MIN_N,discRank,itemDisc};
+if(typeof module!=='undefined'&&module.exports)module.exports={rosterName,NAME_MAX,sessionLabel,testOrder,visibleClasses,loginErrorMsg,rosterPlan,parseNat,parseEx,parseRanges,pwProblem,PW_MIN,EX_MAX,explainPriority,DISC_MIN_N,discRank,itemDisc};

@@ -7,7 +7,7 @@ const S={
   demo:null, me:null,
   tab:'class', selTest:null, selStudent:null, sortBy:'no',
   edit:null, importText:'', importTest:null, importPreview:null,
-  stuTest:null, stuName:'', draft:{}, confirm:null, natText:'', cf:'', stuCls:'', tagText:'', impCls:'', mg:null
+  stuTest:null, stuName:'', draft:{}, confirm:null, natText:'', cf:'', stuCls:'', tagText:'', impResult:'', mg:null, mtExp:null
 };
 const D=()=>S.demo||S.live;
 
@@ -41,6 +41,9 @@ function statusOf(t,c){if(c===undefined)c=(S.teacher||S.demo)&&!S.preview?S.cf:m
 function subScope(){return S.cf?[S.cf]:liveClasses()}
 function subStatus(t,cs){const done=new Set(recordsFor(t.id,'',true).map(r=>ident(r.name)));return submitStatus(t,cs||subScope(),rosterLists(),done)}
 const sidName=r=>r.sid+' '+r.name;
+/* 묶어서 보는 범위의 이름: 반 하나를 골랐거나 반이 하나뿐이면 '반', 여러 반을 합쳐 보면('전체') '전체' */
+const grp=()=>S.cf||classes().length<=1?'반':'전체';
+const grpWa=()=>grp()==='반'?'반과':'전체와';
 
 /* ---------- 기록 모으기 (학생 직접 제출 + 교사 입력) ---------- */
 function allRecords(){
@@ -70,7 +73,9 @@ const nowIso=()=>new Date().toISOString();
 async function load(){
   // Supabase는 한 번에 최대 1000줄만 돌려주므로(.limit을 더 크게 줘도 마찬가지) 1000줄씩 나눠 끝까지 읽는다.
   const ORD={classes:['id'],students:['id'],tests:['id'],test_keys:['test_id'],test_class:['test_id','class_id'],submissions:['id']};
-  const fetchAll=async t=>{const out=[];for(let from=0;;from+=1000){let q=sb.from(t).select('*');for(const c of ORD[t])q=q.order(c);const rows=chk(await q.range(from,from+999));out.push(...rows);if(rows.length<1000)return out}};
+  // students는 필요한 칸만 읽는다(code_hash 비밀번호 해시는 교사도 읽지 않음: 서버에서 그 칸의 읽기 권한을 막아도 그대로 동작).
+  const COLS={students:'id,sid,name,class_id,must_change_pw,fail_count,locked_until,created_at'};
+  const fetchAll=async t=>{const out=[];for(let from=0;;from+=1000){let q=sb.from(t).select(COLS[t]||'*');for(const c of ORD[t])q=q.order(c);const rows=chk(await q.range(from,from+999));out.push(...rows);if(rows.length<1000)return out}};
   const [cl,st,ts,tk,tc,sub]=await Promise.all(Object.keys(ORD).map(fetchAll));
   cl.sort((a,b)=>(a.created_at||'').localeCompare(b.created_at||''));
   const cById={};const idx={classByName:{},studentBySid:{},studentById:{}};
@@ -123,17 +128,20 @@ function render(){
   if(S.demo)html+=`<div class="demo-band" role="note"><span>예시 데이터를 보는 중입니다. 가상의 학생 26명이며 실제 기록이 아니고, 여기서 바꾼 내용은 저장되지 않습니다.</span><button class="btn small" data-act="demo-off">예시 끄기</button></div>`;
   if(!S.session&&!S.demo){app.innerHTML=viewLogin();return}
   if(!S.teacher&&!S.demo){app.innerHTML=`<div class="card empty"><h2>교사로 등록되지 않은 계정입니다</h2><p>Supabase SQL Editor에서 교사 등록 줄(insert into public.teachers …)을 이 계정의 이메일로 실행했는지 확인해 주세요.</p><button class="btn" data-act="logout">로그아웃</button></div>`;return}
-  {if(S.cf&&!classes().includes(S.cf))S.cf='';html+=(!['manage','classes','data'].includes(S.tab)&&allClasses().length?clsBar():'')+({class:viewClass,live:viewLive,student:viewStudentReport,trend:viewTrend,manage:viewManage,classes:viewClasses,data:viewData}[S.tab]||viewClass)()}
+  {if(S.cf&&!classes().includes(S.cf))S.cf='';html+=((!['manage','classes','data'].includes(S.tab)&&allClasses().length)||(S.tab==='manage'&&!S.edit&&!S.reg&&classes().length>1)?clsBar():'')+({class:viewClass,live:viewLive,student:viewStudentReport,trend:viewTrend,manage:viewManage,classes:viewClasses,data:viewData}[S.tab]||viewClass)()}
   app.innerHTML=html;
   afterRender();
 }
-/* 시험 칩: 고른 반에서 열었거나 공개했거나 답안이 있는 시험만 보이고, 나머지는 '▶ 준비 중인 시험 N개'로 접는다(실시간 현황과 같은 방식). */
+/* 시험 칩(반 분석·학생 리포트·실시간 현황이 모두 이것을 쓴다): 칩에는 'N차시'와 상태만, 전체 제목은 마우스를 올리거나 길게 누르면(data-tip)
+   보이고 고른 시험의 전체 제목은 아래 카드 제목에 나온다. 칩은 같은 크기의 격자로 놓고, 2줄을 넘으면 그 안에서 위아래로 넘긴다(afterRender가 고른 칩이 보이게 맞춤). */
+function tpChip(t,sel,act){const [c,l]=statusOf(t);return `<button class="chip tp-chip" aria-pressed="${t.id===sel}" data-act="${act}" data-v="${t.id}" data-tip="${esc(t.title)}" aria-label="${esc(t.title+' · '+l)}"><span class="tp-lb">${esc(chipLabel(t.title))}</span><span class="pill ${c}">${esc(l)}</span></button>`}
+function tpGrid(list,sel,act,label){return `<div class="tp-grid" role="group" aria-label="${esc(label)}">${list.map(t=>tpChip(t,sel,act)).join('')}</div><p class="tp-hint sub">위아래로 넘기면 시험이 더 있습니다</p>`}
+/* 시험 칩: 고른 반에서 열었거나 공개했거나 답안이 있는 시험만 보이고, 나머지는 '준비 중인 시험 N개'로 접는다(같은 칩 모양). */
 function testChips(sel,act='sel-test',filter=null){
   const ts=testList().filter(filter||(()=>true));
   const {main,more}=splitTestChips(ts,scopeClasses(),t=>recordsFor(t.id).length>0);
-  const chip=t=>{const [c,l]=statusOf(t);return `<button class="chip" aria-pressed="${t.id===sel}" data-act="${act}" data-v="${t.id}">${esc(t.title)} <span class="pill ${c}" style="margin-left:4px">${l}</span></button>`};
   const inMore=more.some(t=>t.id===sel);
-  return `<div class="test-picker">${main.length?`<div class="chips" role="group" aria-label="시험 회차">${main.map(chip).join('')}</div>`:'<p class="sub">이 반에서 연 시험이 아직 없습니다.</p>'}${more.length?`<details class="lv-more" ${inMore||!main.length?'open':''}><summary>준비 중인 시험 ${more.length}개</summary><div class="chips" style="margin-top:8px" role="group" aria-label="준비 중인 시험">${more.map(chip).join('')}</div></details>`:''}</div>`;
+  return `<div class="test-picker">${main.length?tpGrid(main,sel,act,'시험 회차'):'<p class="sub">이 반에서 연 시험이 아직 없습니다.</p>'}${more.length?`<details class="lv-more tp-more" ${inMore||!main.length?'open':''}><summary>준비 중인 시험 ${more.length}개</summary>${tpGrid(more,sel,act,'준비 중인 시험')}</details>`:''}</div>`;
 }
 function ensureSel(){const ts=testList();if(!ts.length){S.selTest=null;return null}if(!S.selTest||!D().tests[S.selTest])S.selTest=defaultTestId();return {id:S.selTest,...D().tests[S.selTest]}}
 function noTests(){return `<div class="card empty"><h2>아직 만든 시험이 없습니다</h2><p>시험 관리에서 회차를 만들고 정답을 입력하면, 학생이 답안을 내는 즉시 이곳에 문항별 정답률과 선지 분포가 나타납니다.</p><div class="row" style="justify-content:center"><button class="btn primary" data-act="tab" data-v="manage">시험 만들기</button>${S.demo?'':'<button class="btn" data-act="demo-on">예시 데이터로 둘러보기</button>'}</div></div>`}
@@ -154,21 +162,22 @@ function viewClass(){
       if(nr!=null&&x.rate-nr<=-.15)why.push(['bad',`전국보다 ${Math.round((nr-x.rate)*100)}%p 낮음`]);
       if(x.disc!=null&&x.disc<0)why.push(['warn','변별도 음수 · 정답 확인']);
       return {...x,why,nr}}).filter(x=>x.why.length).sort((a,b)=>b.why.length-a.why.length||a.rate-b.rate).slice(0,8);
-  h+=`<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><h2>${esc(t.title)}</h2><p class="sub">${esc(t.date||'')} · 문항 ${t.items.length}개${hasElectives(t)?' · 선택과목 분리':''}</p></div>
-    </div>${frStagePanel(t,keyMissing)}
-    ${classes().length&&(t.releasedFor||[]).length&&effClasses().some(c=>!isRel(t,c))?`<p class="note" style="margin-top:12px"><b>일부 반에만 공개되어 있습니다.</b> 공개하지 않은 반에는 정답·해설이 보이지 않습니다. 다만 공개한 반 학생이 친구에게 알려 줄 수는 있으니, 같은 시험지를 쓰는 반이 모두 푼 뒤에 공개하는 편이 좋습니다.</p>`:''}
-    ${keyMissing?`<p class="note" style="margin-top:12px"><b>정답이 비어 있는 문항이 있습니다.</b> 시험 관리에서 정답을 모두 입력해야 정답률이 맞게 계산됩니다.</p>`:''}
-    ${recs.some(r=>isRel(t,r.cls)&&r.at>(D().stats[t.id]?.byClass?.[r.cls]?.at||0))?`<p class="note" style="margin-top:12px"><b>공개한 뒤에 새 답안이 들어왔습니다.</b> 학생 화면의 반 정답률을 갱신하려면 <button class="btn small" data-act="release" data-v="${t.id}">공개 자료 갱신</button></p>`:''}
-    <div class="tiles" style="margin-top:14px">
+  h+=`<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><h2>${esc(t.title)}</h2><p class="sub">${[t.date?esc(t.date):'',`문항 ${t.items.length}개`,hasElectives(t)?'선택과목 분리':''].filter(Boolean).join(' · ')}</p></div>
+    </div>
+    <div class="tiles" style="margin-top:12px">
       <div class="tile"><div class="k">응시 인원</div><div class="v">${an.n}<small> 명</small></div></div>
       <div class="tile"><div class="k">평균 (100점 환산)</div><div class="v">${Math.round(an.avgPct*100)}<small> 점</small></div></div>
       <div class="tile"><div class="k">중앙값</div><div class="v">${Math.round(an.medPct*100)}<small> 점</small></div></div>
       <div class="tile"><div class="k">최고 · 최저 (원점수)</div><div class="v">${an.hi}<small> · ${an.lo}</small></div></div>
-    </div></div>`;
+    </div>${frStagePanel(t,keyMissing)}
+    ${classes().length&&(t.releasedFor||[]).length&&effClasses().some(c=>!isRel(t,c))?`<p class="note" style="margin-top:12px"><b>일부 반에만 공개되어 있습니다.</b> 공개하지 않은 반에는 정답·해설이 보이지 않습니다. 다만 공개한 반 학생이 친구에게 알려 줄 수는 있으니, 같은 시험지를 쓰는 반이 모두 푼 뒤에 공개하는 편이 좋습니다.</p>`:''}
+    ${keyMissing?`<p class="note" style="margin-top:12px"><b>정답이 비어 있는 문항이 있습니다.</b> 시험 관리에서 정답을 모두 입력해야 정답률이 맞게 계산됩니다.</p>`:''}
+    ${recs.some(r=>isRel(t,r.cls)&&r.at>(D().stats[t.id]?.byClass?.[r.cls]?.at||0))?`<p class="note" style="margin-top:12px"><b>공개한 뒤에 새 답안이 들어왔습니다.</b> 학생 화면의 반 정답률을 갱신하려면 <button class="btn small" data-act="release" data-v="${t.id}">공개 자료 갱신</button></p>`:''}
+</div>`;
   const whoL=L=>L.map(p=>esc(sidName(p))+(S.cf?'':' ('+esc(p.cls)+')')).join(', ');
   if(SS.m||extra.length)h+=`<div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">제출 현황 ${SS.n}/${SS.m}명</h3>${SS.m&&SS.n===SS.m?'<span class="pill rel">명단 전원 제출</span>':''}</div>${SS.miss.length?`<p class="sub" style="margin-top:6px">아직 답안이 없는 학생: ${whoL(SS.miss)}</p>`:''}${SS.late.length?`<p class="sub" style="margin-top:6px">공개 전에 못 냄(결과를 공개해서 더 낼 수 없음, 종이 답안으로만 넣을 수 있음): ${whoL(SS.late)}</p>`:''}${extra.length?`<p class="sub" style="margin-top:6px;color:var(--warn)">명단에 없는 학번·이름으로 낸 답안: ${extra.map(r=>esc(r.name)).join(', ')} · 학번 오타인지 확인하세요.</p>`:''}</div>`;
   h+=`<div class="grid2"><div class="card"><h3>수업에서 다룰 문항</h3><p class="sub" style="margin-bottom:8px">정답률 50% 미만, 한 오답에 30% 이상 몰림, 전국보다 15%p 이상 낮음, 상위권이 오히려 더 틀린 문항</p>
-    ${focus.length?`<div class="focus-list">${focus.map(x=>`<div class="focus-item"><div class="qno">${esc(x.no)}</div><div style="min-width:0"><div>${esc(x.area)} · ${esc(x.type||'유형 미지정')}</div><div class="why">${x.why.map(([c,l])=>`<span class="pill" style="color:var(--${c})">${esc(l)}</span>`).join('')}</div>${exBlock(D().keys[t.id]?.ex?.[x.i])}</div><div class="num" style="text-align:right">반 <b class="rate lo">${pct(x.rate)}</b>${x.nr!=null?`<br><span class="muted">전국 ${pct(x.nr)}</span>`:''}</div></div>`).join('')}</div>`:'<p class="muted">특별히 짚을 문항이 없습니다.</p>'}
+    ${focus.length?`<div class="focus-list">${focus.map(x=>`<div class="focus-item"><div class="qno">${esc(x.no)}</div><div style="min-width:0"><div>${esc(x.area)} · ${esc(x.type||'유형 미지정')}</div><div class="why">${x.why.map(([c,l])=>`<span class="pill" style="color:var(--${c})">${esc(l)}</span>`).join('')}</div>${exBlock(D().keys[t.id]?.ex?.[x.i])}</div><div class="num" style="text-align:right">${grp()} <b class="rate lo">${pct(x.rate)}</b>${x.nr!=null?`<br><span class="muted">전국 ${pct(x.nr)}</span>`:''}</div></div>`).join('')}</div>`:'<p class="muted">특별히 짚을 문항이 없습니다.</p>'}
     </div><div class="stack"><div class="card"><h3>영역별 정답률</h3>${barRows(Object.entries(an.area).map(([k,v])=>({label:k,v})))}</div>
     <div class="card"><h3>유형별 정답률</h3>${barRows(Object.entries(an.type).sort((a,b)=>a[1]-b[1]).map(([k,v])=>({label:k,v})))}</div></div></div>`;
   const setNames=[...new Set(t.items.map(x=>x.set).filter(Boolean))];
@@ -181,13 +190,29 @@ function viewClass(){
   rows.sort(sorters[S.sortBy]||sorters.no);
   const sb=(k,l)=>`<button data-act="sort" data-v="${k}" aria-pressed="${S.sortBy===k}">${l}${S.sortBy===k?' ↓':''}</button>`;
   h+=`<div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">문항별 분석</h3><div class="legend"><span><i style="background:var(--s1)"></i>정답 선지</span><span><i style="background:var(--s2)"></i>매력적 오답(20% 이상)</span><span><i style="background:var(--line2)"></i>그 밖의 선지</span></div></div>
-   <div class="tbl-wrap" style="margin-top:10px"><table><thead><tr><th>${sb('no','번호')}</th><th>영역 · 유형</th><th>정답</th><th class="n">${sb('rate','반 정답률')}</th>${nat?`<th class="n">전국</th><th class="n">${sb('gap','차이')}</th>`:''}<th>우리 반 선지 분포 (%)</th>${nat?'<th>전국 선지 (%)</th>':''}<th class="n">${sb('disc','변별도')}</th></tr></thead><tbody>
+   <div class="tbl-wrap" style="margin-top:10px"><table><thead><tr><th>${sb('no','번호')}</th><th>영역 · 유형</th><th>정답</th><th class="n">${sb('rate',grp()+' 정답률')}</th>${nat?`<th class="n">전국</th><th class="n">${sb('gap','차이')}</th>`:''}<th>${grp()==='반'?'우리 반':'전체'} 선지 분포 (%)</th>${nat?'<th>전국 선지 (%)</th>':''}<th class="n">${sb('disc','변별도')}</th></tr></thead><tbody>
    ${rows.map(x=>{const nr=nat?.[x.i]?.r;const nd=nat?.[x.i]?.d;return `<tr><td class="mono"><b>${esc(x.no)}</b></td><td>${esc(x.area)}<br><span class="muted">${esc(x.type||'')}</span></td><td class="mono">${CIR[+x.ans]||'?'}</td><td class="n"><span class="rate ${x.rate<.5?'lo':x.rate>=.8?'hi':''}">${pct(x.rate)}</span><br><span class="muted">${x.c}/${x.n}</span></td>${nat?`<td class="n">${pct(nr)}</td><td class="n ${nr!=null&&x.rate-nr<=-.15?'rate lo':''}">${nr!=null?pp(x.rate-nr):'–'}</td>`:''}<td>${distBar(x)}</td>${nat?`<td class="distlab">${nd?nd.map((v,o)=>`${CIR[o+1]}${v==null?'–':Math.round(v*100)}`).join(' '):'–'}</td>`:''}<td class="n" data-tip="${an.n<DISC_MIN_N?`응시 인원이 적어 참고하기 어렵습니다(${DISC_MIN_N}명 이상일 때 계산)`:'상위 27% 정답률 − 하위 27% 정답률. 0.2 미만이면 변별이 약하고, 음수면 정답·문항 오류를 확인해 보세요.'}">${x.disc==null?'–':x.disc.toFixed(2)}</td></tr>`}).join('')}
    </tbody></table></div>${an.n<DISC_MIN_N?`<p class="sub" style="margin-top:6px">변별도: 응시 인원이 적어 참고하기 어렵습니다(${DISC_MIN_N}명 이상일 때 계산합니다).</p>`:''}</div></div>`;
   return h;
 }
 
 /* ----- 학생 리포트 ----- */
+/* 학생 리포트 학생 고르기: 반(전체일 때만) + 학번·이름 찾기 + 고르기 칸. 고르기 칸 글 앞 ✓ = 이 시험 한마디 있음, • = 저장 안 됨.
+   찾기 칸에 적으면 다시 그리지 않고 고르기 칸의 목록만 줄인다(적는 중에 칸이 사라지지 않게). */
+function stuOptLabel(r){const s=ident(r.name);const k=S.selTest+'|'+s;const has=typeof FR!=='undefined'&&FR.fb[k];const dirty=typeof fbDirty==='function'&&fbDirty(k);return (has?'✓ ':'')+r.name+(S.cf||!r.cls?'':' · '+r.cls)+(dirty?' •':'')}
+function stuOpts(recs,cur){const F=S.stuF||{};const q=(F.q||'').trim();
+  const L=recs.filter(r=>r.name===cur||((!F.cls||S.cf||r.cls===F.cls)&&(!q||r.name.includes(q))));
+  return L.map(x=>`<option value="${esc(x.name)}" ${x.name===cur?'selected':''}>${esc(stuOptLabel(x))}</option>`).join('')}
+function stuPicker(recs,rec){
+  const F=S.stuF=S.stuF||{cls:'',q:''};const cs=[...new Set(recs.map(r=>r.cls).filter(Boolean))];
+  return `${!S.cf&&cs.length>1?`<label class="f">반<select id="stuCf"><option value="">모든 반</option>${cs.map(c=>`<option ${c===F.cls?'selected':''}>${esc(c)}</option>`).join('')}</select></label>`:''}
+    ${recs.length>12?`<label class="f">찾기<input type="search" id="stuQ2" value="${esc(F.q)}" placeholder="학번 또는 이름" autocomplete="off" style="width:140px"></label>`:''}
+    <label class="f">학생 선택 <span class="muted" style="font-weight:400">(${recs.length}명 · ✓ 한마디 있음)</span><select id="stuSel" data-act="sel-student">${stuOpts(recs,rec.name)}</select></label>`;
+}
+document.addEventListener('input',e=>{if(e.target.id!=='stuQ2')return;S.stuF.q=e.target.value;const sel=$('#stuSel');if(!sel)return;
+  const t=D().tests[S.selTest];if(!t)return;sel.innerHTML=stuOpts(recordsFor(S.selTest),S.selStudent);
+  const n=sel.options.length;const lb=sel.closest('label')?.querySelector('.muted');if(lb)lb.textContent=`(찾은 ${n}명 · ✓ 한마디 있음)`});
+
 function viewStudentReport(){
   const t=ensureSel();if(!t)return noTests();
   const recs=recordsFor(t.id);
@@ -203,19 +228,19 @@ function viewStudentReport(){
   const trend=tl.map(tt=>{const rr=all[tt.id];if(!rr)return null;const k=keyOf(tt.id);const rs=recordsFor(tt.id);const a2=analyze(tt,k,rs);const nt=natOf(tt.id);let hm=null,hn=null,hc=null;if(nt){const g2=grade(tt,k,rr);const idx=g2.idx.filter(i=>nt[i]?.r!=null);if(idx.length>=2){hm=idx.filter(i=>g2.res[i]).length/idx.length;hn=idx.reduce((a,i)=>a+nt[i].r,0)/idx.length;hc=idx.reduce((a,i)=>a+(a2.items[i].rate??0),0)/idx.length}}return {label:tt.title,me:grade(tt,k,rr).pct,cls:a2.avgPct,hm,hn,hc}});
   const tr=trend.filter(Boolean);
   const myPicks=[],clsPicks=[];for(const tt of tl){const tg=D().keys[tt.id]?.tags;if(!tg)continue;const k=keyOf(tt.id);for(const rr of recordsFor(tt.id)){const p=tagPicks(tt,k,tg,rr,tt.id);if(rr.name===rec.name)myPicks.push(...p);clsPicks.push(...p)}}
-  r.tagCum=myPicks;fb=feedbackText(rec.name,t,r,cls);
-  h+=`<div class="card"><div class="row" style="justify-content:space-between"><label class="f">학생 선택<select id="stuSel" data-act="sel-student">${recs.map(x=>`<option ${x.name===rec.name?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label>
-    <div class="tiles" style="flex:1;max-width:560px"><div class="tile"><div class="k">점수</div><div class="v">${r.score}<small> / ${r.max}</small></div></div><div class="tile"><div class="k">반 평균 대비</div><div class="v">${pp(r.pct-an.avgPct)}<small> %p</small></div></div><div class="tile"><div class="k">틀린 문항</div><div class="v">${r.wrong.length}<small> 개</small></div></div></div></div></div>
+  r.tagCum=myPicks;fb=feedbackText(rec.name,t,r,cls);if(grp()==='전체')fb=fb.replace('(반 평균 ','(전체 평균 ').replace('· 반 평균보다 약한 유형','· 전체 평균보다 약한 유형').replace(/ \/ 반 (\d|–)/g,' / 전체 $1').replace('반 전체가 어려워한','전체 학생이 어려워한');// core.js 문구는 '반' 기준
+  h+=`<div class="card"><div class="row" style="justify-content:space-between"><div class="stu-pick">${stuPicker(recs,rec)}</div>
+    <div class="tiles" style="flex:1 1 300px;min-width:0;max-width:560px"><div class="tile"><div class="k">점수</div><div class="v">${r.score}<small> / ${r.max}</small></div></div><div class="tile"><div class="k">${grp()} 평균 대비</div><div class="v">${pp(r.pct-an.avgPct)}<small> %p</small></div></div><div class="tile"><div class="k">틀린 문항</div><div class="v">${r.wrong.length}<small> 개</small></div></div></div></div></div>
   ${frStudentCards(t,rec,recs,key)}
-  <div class="grid2"><div class="card"><h3>많이 맞혔는데 놓친 문항</h3><p class="sub" style="margin-bottom:8px">${nat?'전국':'반'} 정답률 70% 이상인데 틀린 문항입니다. 실수나 근거 확인 부족일 가능성이 큽니다.</p>
-    ${r.missedEasy.length?`<div class="focus-list">${r.missedEasy.map(x=>`<div class="focus-item"><div class="qno">${esc(x.no)}</div><div>${esc(x.area)}${x.type?' · '+esc(x.type):''}<div class="why"><span class="pill" style="color:var(--bad)">고른 답 ${(x.mine==='0'?'무응답':CIR[+x.mine])}</span><span class="pill" style="color:var(--s1)">정답 ${CIR[+x.ans]}</span></div></div><div class="num" style="text-align:right">반 ${pct(x.rate)}${x.nr!=null?`<br><span class="muted">전국 ${pct(x.nr)}</span>`:''}</div></div>`).join('')}</div>`:'<p class="muted">해당 문항이 없습니다.</p>'}
-  </div><div class="card"><h3>영역별 · 반과 비교</h3>${barRows(r.areaCmp.map(x=>({label:x.name,v:x.me,w:x.cls})),{a:rec.name,b:'반 평균'})}
-    <h3 style="margin-top:18px">반보다 약한 유형</h3>${r.weak.length?barRows(r.weak.map(x=>({label:x.name,v:x.me,w:x.cls})),{a:rec.name,b:'반 평균'}):'<p class="muted">반 평균보다 20%p 이상 낮은 유형(2문항 이상)이 없습니다.</p>'}</div></div>
+  <div class="grid2"><div class="card"><h3>많이 맞혔는데 놓친 문항</h3><p class="sub" style="margin-bottom:8px">${nat?'전국':grp()} 정답률 70% 이상인데 틀린 문항입니다. 실수나 근거 확인 부족일 가능성이 큽니다.</p>
+    ${r.missedEasy.length?`<div class="focus-list">${r.missedEasy.map(x=>`<div class="focus-item"><div class="qno">${esc(x.no)}</div><div>${esc(x.area)}${x.type?' · '+esc(x.type):''}<div class="why"><span class="pill" style="color:var(--bad)">고른 답 ${(x.mine==='0'?'무응답':CIR[+x.mine])}</span><span class="pill" style="color:var(--s1)">정답 ${CIR[+x.ans]}</span></div></div><div class="num" style="text-align:right">${grp()} ${pct(x.rate)}${x.nr!=null?`<br><span class="muted">전국 ${pct(x.nr)}</span>`:''}</div></div>`).join('')}</div>`:'<p class="muted">해당 문항이 없습니다.</p>'}
+  </div><div class="card"><h3>영역별 · ${grpWa()} 비교</h3>${barRows(r.areaCmp.map(x=>({label:x.name,v:x.me,w:x.cls})),{a:rec.name,b:grp()+' 평균'})}
+    <h3 style="margin-top:18px">${grp()}보다 약한 유형</h3>${r.weak.length?barRows(r.weak.map(x=>({label:x.name,v:x.me,w:x.cls})),{a:rec.name,b:grp()+' 평균'}):`<p class="muted">${grp()} 평균보다 20%p 이상 낮은 유형(2문항 이상)이 없습니다.</p>`}</div></div>
   ${setCard(r)}${tagCard(myPicks,clsPicks,'t')}${r.rare.length?`<div class="card"><h3>드물게 고른 오답</h3><p class="sub" style="margin-bottom:8px">전국 응시자 5% 이하가 고른 선지를 골라 틀린 문항입니다(전국 자료가 없는 문항은 반에서 혼자 고른 경우). 함정이 아니라 발문·지문을 잘못 읽었거나 마킹 실수였을 가능성이 큽니다.</p><div class="focus-list">${r.rare.map(x=>`<div class="focus-item"><div class="qno">${esc(x.no)}</div><div>${esc(x.area)}${x.type?' · '+esc(x.type):''}<div class="why"><span class="pill" style="color:var(--bad)">고른 답 ${CIR[+x.mine]}</span><span class="pill" style="color:var(--s1)">정답 ${CIR[+x.ans]}</span></div></div><div class="num" style="text-align:right">${x.src==='전국'?'전국 '+(Math.round(x.sh*1000)/10)+'%가 선택':'반에서 혼자 선택'}</div></div>`).join('')}</div></div>`:''}
-  <div class="grid2"><div class="card"><h3>회차별 점수 추이 (100점 환산)</h3>${lineChart(tr.map(x=>x.label),[{name:rec.name,color:'var(--s2)',values:tr.map(x=>x.me)},{name:'반 평균',color:'var(--s1)',values:tr.map(x=>x.cls)}])}</div>
+  <div class="grid2"><div class="card"><h3>회차별 점수 추이 (100점 환산)</h3>${lineChart(tr.map(x=>x.label),[{name:rec.name,color:'var(--s2)',values:tr.map(x=>x.me)},{name:grp()+' 평균',color:'var(--s1)',values:tr.map(x=>x.cls)}])}</div>
   <div class="card"><h3 class="h-tag">개별 피드백 문구(자동 초안) <span class="vis-tag off">학생에게 안 보임 · 복사해서 쓰는 글</span></h3><p class="sub" style="margin-bottom:8px">자동으로 만든 초안입니다. 고친 다음 복사해서 보내세요. 여기 적은 글은 저장되지 않습니다.</p><textarea id="fbText" rows="9" style="font-family:var(--f-body);font-size:14px">${esc(fb)}</textarea><div class="row" style="margin-top:8px"><button class="btn primary" data-act="copy-fb">피드백 복사</button></div></div></div>
-  ${tr.some(x=>x.hm!=null)?`<div class="card"><h3>어려운 문항 정답률 추이 (전국 오답률 상위 15문항 기준)</h3><p class="sub" style="margin-bottom:8px">회차마다 난도가 달라 점수만으로는 성장을 보기 어렵습니다. 전국에서 많이 틀린 문항만 골라 전국 정답률과 나란히 봅니다. 회차당 해당 문항이 적으면 값이 크게 흔들리니 여러 회차를 묶어서 보세요.</p>${natTrendChart(tr.map(x=>x.label),[{name:rec.name,color:'var(--s2)',values:tr.map(x=>x.hm)},{name:'반',color:'var(--s1)',values:tr.map(x=>x.hc)},{name:'전국',color:'var(--muted)',values:tr.map(x=>x.hn)}])}</div>`:''}
-  <div class="card"><h3>틀린 문항 전체</h3>${r.wrong.length?`<div class="tbl-wrap"><table><thead><tr><th>번호</th><th>영역 · 유형</th><th>고른 답</th><th>정답</th><th class="n">반 정답률</th>${nat?'<th class="n">전국</th>':''}<th class="n">같은 답 고른 비율</th></tr></thead><tbody>${r.wrong.map(x=>{const itx=an.items[x.i];return `<tr><td class="mono"><b>${esc(x.no)}</b></td><td>${esc(x.area)}${x.type?' · '+esc(x.type):''}${exBlock(D().keys[t.id]?.ex?.[x.i])}</td><td class="mono">${(x.mine==='0'?'무응답':CIR[+x.mine])}</td><td class="mono">${CIR[+x.ans]}</td><td class="n">${pct(x.rate)}</td>${nat?`<td class="n">${pct(x.nr)}</td>`:''}<td class="n">${pct(itx.dist[+x.mine]||0)}</td></tr>`}).join('')}</tbody></table></div>`:'<p class="muted">틀린 문항이 없습니다.</p>'}</div></div>`;
+  ${tr.some(x=>x.hm!=null)?`<div class="card"><h3>어려운 문항 정답률 추이 (전국 오답률 상위 15문항 기준)</h3><p class="sub" style="margin-bottom:8px">회차마다 난도가 달라 점수만으로는 성장을 보기 어렵습니다. 전국에서 많이 틀린 문항만 골라 전국 정답률과 나란히 봅니다. 회차당 해당 문항이 적으면 값이 크게 흔들리니 여러 회차를 묶어서 보세요.</p>${natTrendChart(tr.map(x=>x.label),[{name:rec.name,color:'var(--s2)',values:tr.map(x=>x.hm)},{name:grp(),color:'var(--s1)',values:tr.map(x=>x.hc)},{name:'전국',color:'var(--muted)',values:tr.map(x=>x.hn)}])}</div>`:''}
+  <div class="card"><h3>틀린 문항 전체</h3>${r.wrong.length?`<div class="tbl-wrap"><table><thead><tr><th>번호</th><th>영역 · 유형</th><th>고른 답</th><th>정답</th><th class="n">${grp()} 정답률</th>${nat?'<th class="n">전국</th>':''}<th class="n">같은 답 고른 비율</th></tr></thead><tbody>${r.wrong.map(x=>{const itx=an.items[x.i];return `<tr><td class="mono"><b>${esc(x.no)}</b></td><td>${esc(x.area)}${x.type?' · '+esc(x.type):''}${exBlock(D().keys[t.id]?.ex?.[x.i])}</td><td class="mono">${(x.mine==='0'?'무응답':CIR[+x.mine])}</td><td class="mono">${CIR[+x.ans]}</td><td class="n">${pct(x.rate)}</td>${nat?`<td class="n">${pct(x.nr)}</td>`:''}<td class="n">${pct(itx.dist[+x.mine]||0)}</td></tr>`}).join('')}</tbody></table></div>`:'<p class="muted">틀린 문항이 없습니다.</p>'}</div></div>`;
   return h;
 }
 
@@ -233,11 +258,11 @@ function viewTrend(){
   const names=Object.keys(stu).sort((a,b)=>a.localeCompare(b,'ko'));
   const cell=(nm,ty)=>{const s=stu[nm][ty];if(!s||!s.n)return '<td class="muted">·</td>';const d=s.c/s.n-tot[ty].c/tot[ty].n;const m=Math.min(55,Math.round(Math.abs(d)*110));return `<td style="background:color-mix(in oklab, ${d>=0?'var(--div-pos)':'var(--div-neg)'} ${m}%, var(--div-mid))" data-tip="${esc(nm+' · '+ty+'\n본인 '+pct(s.c/s.n)+' ('+s.c+'/'+s.n+') · 반 '+pct(tot[ty].c/tot[ty].n))}">${pp(d)}</td>`};
   const hd=ans.map(({t,an})=>{const nt=natOf(t.id);if(!nt)return {hc:null,hn:null};const its=an.items.filter(x=>x.n&&nt[x.i]?.r!=null);if(its.length<2)return {hc:null,hn:null};return {hc:its.reduce((a,x)=>a+x.rate,0)/its.length,hn:its.reduce((a,x)=>a+nt[x.i].r,0)/its.length}});
-  const hardCard=hd.some(x=>x.hc!=null)?`<div class="card"><h3>어려운 문항 정답률: 반과 전국 (전국 오답률 상위 15문항 기준)</h3>${natTrendChart(ans.map(x=>x.t.title),[{name:'반',color:'var(--s1)',values:hd.map(x=>x.hc)},{name:'전국',color:'var(--muted)',values:hd.map(x=>x.hn)}])}<p class="sub">반 선이 전국 선에 가까워지거나 넘어서면 어려운 문항을 다루는 힘이 늘고 있다는 뜻입니다.</p></div>`:'';
+  const hardCard=hd.some(x=>x.hc!=null)?`<div class="card"><h3>어려운 문항 정답률: ${grpWa()} 전국 (전국 오답률 상위 15문항 기준)</h3>${natTrendChart(ans.map(x=>x.t.title),[{name:grp(),color:'var(--s1)',values:hd.map(x=>x.hc)},{name:'전국',color:'var(--muted)',values:hd.map(x=>x.hn)}])}<p class="sub">${grp()} 선이 전국 선에 가까워지거나 넘어서면 어려운 문항을 다루는 힘이 늘고 있다는 뜻입니다.</p></div>`:'';
   return `<div class="stack"><div class="grid2">
-   <div class="card"><h3>반 평균 추이 (100점 환산)</h3>${lineChart(ans.map(x=>x.t.title),[{name:'반 평균',color:'var(--s1)',values:ans.map(x=>x.an.avgPct)}])}<p class="sub">회차마다 시험 난이도가 다르므로, 전국 정답률을 넣은 회차는 반 분석의 '차이' 열과 함께 보세요.</p></div>
+   <div class="card"><h3>${grp()} 평균 추이 (100점 환산)</h3>${lineChart(ans.map(x=>x.t.title),[{name:grp()+' 평균',color:'var(--s1)',values:ans.map(x=>x.an.avgPct)}])}<p class="sub">회차마다 시험 난이도가 다르므로, 전국 정답률을 넣은 회차는 반 분석의 '차이' 열과 함께 보세요.</p></div>
    <div class="card"><h3>영역별 정답률 추이</h3>${lineChart(ans.map(x=>x.t.title),areas.map(a=>({name:a,color:AREA_COLOR[a],values:ans.map(x=>x.an.area[a]??null)})))}</div></div>${hardCard}
-   <div class="card"><h3>학생 × 유형: 반 평균과의 차이 (%p, 전 회차 합산)</h3><p class="sub" style="margin-bottom:10px">파란 칸은 반보다 잘한 유형, 붉은 칸은 반보다 약한 유형입니다. 칸에 마우스를 올리면 문항 수가 나옵니다. 문항 수가 적은 칸은 우연의 영향이 큽니다.</p>
+   <div class="card"><h3>학생 × 유형: ${grp()} 평균과의 차이 (%p, 전 회차 합산)</h3><p class="sub" style="margin-bottom:10px">파란 칸은 반보다 잘한 유형, 붉은 칸은 반보다 약한 유형입니다. 칸에 마우스를 올리면 문항 수가 나옵니다. 문항 수가 적은 칸은 우연의 영향이 큽니다.</p>
    <div class="legend" style="margin-bottom:8px"><span><i style="background:color-mix(in oklab,var(--div-neg) 55%,var(--div-mid))"></i>반보다 낮음</span><span><i style="background:var(--div-mid)"></i>비슷함</span><span><i style="background:color-mix(in oklab,var(--div-pos) 55%,var(--div-mid))"></i>반보다 높음</span></div>
    <div class="tbl-wrap"><table class="heat"><thead><tr><th>학생</th>${types.map(t=>`<th>${esc(t)}</th>`).join('')}</tr></thead><tbody>${names.map(nm=>`<tr><td class="nm">${esc(nm)}</td>${types.map(ty=>cell(nm,ty)).join('')}</tr>`).join('')}</tbody></table></div></div></div>`;
 }
@@ -259,13 +284,60 @@ function moreMenu(inner,label,text='⋯'){return `<details class="more-menu"><su
 /* 응시 열기 확인 문구: '3차시를 test반에 엽니다.' */
 function openMsg(t,c){const lb=sessionLabel(t.title,40);const m=/차시$/.test(lb)?lb+'를':`'${lb}'을(를)`;return `${m} ${c}에 엽니다. 학생 폰에 바로 답안지가 뜹니다.`}
 /* 반 하나의 응시 버튼: 숨김 → 표시만, 결과 공개됨 → 표시만(공개를 취소하면 다시 버튼), 응시 중 → 닫기, 아니면 열기(한 번 더 확인) */
-function openCtl(t,c){
-  if(!c&&allClasses().length)return '';const nm=c?esc(c)+' ':'';const v=`${t.id}|${esc(c)}`;
-  if(isHiddenCls(c))return `<span class="badge">${esc(c)} 숨김</span>`;
+function openCtl(t,c,bare){
+  if(!c&&allClasses().length)return '';const nm=c&&!bare?esc(c)+' ':'';const v=`${t.id}|${esc(c)}`;
+  if(isHiddenCls(c))return `<span class="badge">${bare?'':esc(c)+' '}숨김</span>`;
   if(isRel(t,c))return `<span class="badge good" title="결과 공개를 취소하면 다시 응시를 열 수 있습니다">${nm}결과 공개됨</span>`;
   if(isOpen(t,c))return `<button class="btn small" data-act="close" data-v="${v}">${nm}응시 닫기</button>`;
   if(S.confirm==='open:'+t.id+'|'+c)return `<span class="confirm" role="alert">${esc(openMsg(t,c))} <span class="row" style="gap:6px"><button class="btn small primary" data-act="open" data-v="${v}">열기</button><button class="btn small" data-act="cancel-confirm">취소</button></span></span>`;
   return `<button class="btn small" data-act="open-ask" data-v="${v}">${nm}응시 열기</button>`;
+}
+/* ----- 여러 반 한꺼번에: 응시 열기·닫기·결과 공개·정답·해설 공개 (시험 관리 '반별 열기·닫기', 반 분석 '전체') -----
+   버튼을 누르면 화면 안 확인 상자 하나: 반마다 체크(할 수 있는 반만 처음부터 체크)·미제출 수 → 한 번에 저장, 결과 한 줄. */
+function bulkRows(t,act){
+  const done=new Set(recordsFor(t.id,'',true).map(r=>ident(r.name)));const recs={};for(const c of liveClasses())recs[c]=recordsFor(t.id,c,true).length;
+  const keyMissing=t.items.some((_,i)=>{const k=keyOf(t.id)[i];return !k||k==='0'});
+  return bulkPlan(act,t,liveClasses(),{recs,lists:rosterLists(),done,keyRel:c=>typeof frKeyRel==='function'&&frKeyRel(t.id,c),hidden:hiddenClasses(),keyMissing});
+}
+function bulkBar(t){
+  if(liveClasses().length<2)return '';
+  const B=S.bulk&&S.bulk.tid===t.id?S.bulk:null;
+  const btn=a=>{const n=bulkRows(t,a).filter(r=>r.ok).length;return `<button class="btn small${a==='release'?' red':a==='key'?' primary':''}" data-act="bulk-ask" data-v="${t.id}|${a}" ${n?'':'disabled'} title="${n?`할 수 있는 반 ${n}개`:'할 수 있는 반이 없습니다'}">${BULK_LABEL[a]}${n?` (${n})`:''}</button>`};
+  let h=`<div class="bulk-bar"><span class="sub"><b>모든 반 한꺼번에</b></span>${['open','close','release','key'].map(btn).join('')}</div>`;
+  if(B){const R=bulkRows(t,B.act);const sel=R.filter(r=>r.ok&&B.sel[r.cls]!==false);
+    const note={open:'고른 반 학생 폰에 바로 답안지가 뜹니다.',close:'고른 반 학생은 더 낼 수 없습니다(결과 공개 전까지는 다시 열 수 있음).',release:'학생에게 점수와 문항별 맞음/틀림이 보이고 틀린 문항을 다시 풀 수 있습니다. 응시가 닫히고, 아직 안 낸 학생은 더 낼 수 없습니다.',key:'학생에게 정답·해설·한마디가 보이고, 다시 풀기는 더 낼 수 없습니다.'}[B.act];
+    h+=`<div class="bulk-box" role="alertdialog" aria-label="${esc(BULK_LABEL[B.act])} 확인"><p><b>${esc(sessionLabel(t.title,24))} · ${esc(BULK_LABEL[B.act])}</b> ${esc(note)}</p>
+      <div class="bulk-list">${R.map(r=>`<label class="bulk-cls${r.ok?'':' off'}"><input type="checkbox" data-bulk-cls="${esc(r.cls)}" ${r.ok&&B.sel[r.cls]!==false?'checked':''} ${r.ok?'':'disabled'}> <b>${esc(r.cls)}</b> <span class="sub">${r.ok?(B.act==='open'?`명단 ${r.size}명`:`미제출 ${r.miss}명`):esc(r.why)}</span></label>`).join('')}</div>
+      <div class="row" style="gap:6px;margin-top:8px"><button class="btn small ${B.act==='release'?'red':'primary'}" data-act="bulk-go" ${sel.length?'':'disabled'}>${sel.length}개 반 ${esc(BULK_LABEL[B.act])}</button><button class="btn small" data-act="bulk-cancel">취소</button></div></div>`}
+  return h;
+}
+async function bulkGo(){
+  const B=S.bulk;if(!B)return;const t={id:B.tid,...D().tests[B.tid]};if(!t.items)return;
+  const cs=bulkRows(t,B.act).filter(r=>r.ok&&B.sel[r.cls]!==false).map(r=>r.cls);S.bulk=null;if(!cs.length){render();return}
+  const ids=cs.map(clsId);const now=nowIso();const key=keyOf(t.id);const names=cs.join('·');
+  const run={
+    open:async()=>chk(await sb.from('test_class').upsert(cs.map(c=>({test_id:t.id,class_id:clsId(c),is_open:true})),{onConflict:'test_id,class_id'})),
+    close:async()=>chk(await sb.from('test_class').update({is_open:false,closed_once:true}).eq('test_id',t.id).in('class_id',ids)),
+    // 결과 공개는 반마다 통계가 달라 줄마다 만들어 한 번에 올린다(공개하면 응시도 닫음: 한 반씩 공개할 때와 같은 규칙)
+    release:async()=>chk(await sb.from('test_class').upsert(cs.map(c=>({test_id:t.id,class_id:clsId(c),released:true,released_at:now,stats:toStats(analyze(t,key,recordsFor(t.id,c,true))),is_open:false,closed_once:true})),{onConflict:'test_id,class_id'})),
+    key:async()=>chk(await sb.from('test_class').update({key_released:true,key_released_at:now}).eq('test_id',t.id).in('class_id',ids))}[B.act];
+  const msg={open:'응시를 열었습니다',close:'응시를 닫았습니다',release:'결과를 공개했습니다',key:'정답·해설을 공개했습니다'}[B.act];
+  if(await api(run,`${cs.length}개 반(${names})에 ${msg}`)&&B.act==='open'){S.selTest=t.id;S.importTest=t.id;if(S.lv){S.lv.tid=t.id;S.lv.at=0}render()}
+}
+/* 시험 관리 한 줄(700px 이하에서는 카드 한 장). 반이 여럿일 때: 위 반 칩에서 반을 고르면 그 반 상태와 버튼 하나,
+   '전체'면 전체 상태(응시 중 2/8 같은)와 '반별 열기·닫기' 펼치기(펼치면 반마다 한 줄: 반 이름 · 상태 · 버튼). */
+function mtRow(t){
+  const k=keyOf(t.id);const filled=t.items.filter((_,i)=>k[i]&&k[i]!=='0').length;const nat=natOf(t.id);const cf=S.confirm==='del:'+t.id;
+  const multi=classes().length>1;const one=multi?S.cf:effClasses()[0];
+  const scope=one?[one]:effClasses();const open=scope.some(c=>isOpen(t,c));
+  let stat,act,extra='';
+  if(!multi||one){const [c2,l2]=statusOf(t,one);stat=`<span class="pill ${c2}">${one&&multi?esc(one)+' ':''}${l2}</span>`;act=openCtl(t,one)}
+  else{const [c2,l2]=statusOf(t,'');stat=`<span class="pill ${c2}">${l2}</span>`;
+    const exp=S.mtExp===t.id||String(S.confirm||'').startsWith('open:'+t.id+'|')||S.bulk?.tid===t.id;
+    act=`<button class="btn small" data-act="mt-exp" data-v="${t.id}" aria-expanded="${exp}">반별 열기·닫기 ${exp?'▴':'▾'}</button>`;
+    if(exp)extra=`<tr class="mt-cls-row${open?' is-open':''}"><td colspan="6">${bulkBar(t)}<div class="mt-cls-list" role="group" aria-label="${esc(sessionLabel(t.title,20))} 반별 응시">${classes().map(c=>{const [c3,l3]=statusOf(t,c);return `<div class="mt-cls"><b>${esc(c)}</b><span class="pill ${c3}">${l3}</span><span class="mt-cls-act">${isRel(t,c)?"":openCtl(t,c,true)}</span></div>`}).join('')}</div></td></tr>`}
+  const del=cf?`<span class="confirm">이 시험에 낸 답안 기록도 함께 지워집니다 <button class="btn small red" data-act="del-yes" data-v="${t.id}">삭제</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:moreMenu(`<button class="btn small ghost danger" data-act="del" data-v="${t.id}">시험 삭제…</button>`,'시험 '+t.title+' 더보기');
+  return `<tr class="mt-row${open?' is-open':''}"><td class="mt-t"><b>${esc(t.title)}</b>${t.date?`<br><span class="muted">${esc(t.date)}</span>`:''}</td><td class="mt-s" data-l="상태">${stat}</td><td class="n mt-n" data-l="답안">${recordsFor(t.id,'').length}</td><td class="num mt-k" data-l="정답">${filled}/${t.items.length}</td><td class="mt-nat" data-l="전국 자료">${nat&&nat.some(Boolean)?'있음':'<span class="muted">없음</span>'}</td><td class="mt-a"><div class="row" style="gap:6px">${act}<button class="btn small" data-act="edit" data-v="${t.id}">편집</button>${del}</div></td></tr>${extra}`;
 }
 function viewManage(){
   if(S.edit)return viewEditor();
@@ -273,7 +345,10 @@ function viewManage(){
   const ts=testList();
   let h=`<div class="stack"><div class="card"><div class="row" style="justify-content:space-between"><div><h2>시험 회차</h2><p class="sub">회차를 만들고 정답을 넣은 뒤 응시를 열면, 학생 화면에 답안지가 나타납니다.</p></div><div class="row"><button class="btn primary" data-act="new-test">새 시험 만들기</button><button class="btn" data-act="reg-open">파일로 새 시험 만들기</button>${S.demo?'':'<button class="btn" data-act="demo-on">예시 데이터로 둘러보기</button>'}</div></div>`;
   if(!ts.length)h+=`<p class="note" style="margin-top:14px">아직 시험이 없습니다. <b>새 시험 만들기</b>를 누르면 45문항 틀이 미리 채워집니다. 영역 구분은 실제 시험지를 보고 맞춰 주세요.</p>`;
-  else h+=`<div class="tbl-wrap" style="margin-top:14px"><table class="mt-table"><thead><tr><th>시험</th><th>상태</th><th class="n">답안</th><th>정답</th><th>전국 자료</th><th></th></tr></thead><tbody>${ts.map(t=>{const [c,l]=statusOf(t);const k=keyOf(t.id);const filled=t.items.filter((_,i)=>k[i]&&k[i]!=='0').length;const nat=natOf(t.id);const cf=S.confirm==='del:'+t.id;return `<tr${effClasses().some(cc=>isOpen(t,cc))?' class="is-open"':''}><td><b>${esc(t.title)}</b><br><span class="muted">${esc(t.date||'')}</span></td><td>${classes().length?classes().map(cc=>{const [c2,l2]=statusOf(t,cc);return `<div><span class="pill ${c2}">${esc(cc)} ${l2}</span></div>`}).join(''):`<span class="pill ${c}">${l}</span>`}</td><td class="n">${recordsFor(t.id,'').length}</td><td class="num">${filled}/${t.items.length}</td><td>${nat&&nat.some(Boolean)?'있음':'<span class="muted">없음</span>'}</td><td><div class="row" style="gap:6px">${effClasses().map(c=>openCtl(t,c)).join('')}<button class="btn small" data-act="edit" data-v="${t.id}">편집</button>${cf?`<span class="confirm">이 시험에 낸 답안 기록도 함께 지워집니다 <button class="btn small red" data-act="del-yes" data-v="${t.id}">삭제</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:moreMenu(`<button class="btn small ghost danger" data-act="del" data-v="${t.id}">시험 삭제…</button>`,'시험 '+t.title+' 더보기')}</div></td></tr>`}).join('')}</tbody></table></div>`;
+  else{
+    if(classes().length>1)h+=`<p class="note" style="margin-top:14px">${S.cf?`<b>${esc(S.cf)}</b>의 상태와 버튼만 보입니다. 다른 반은 위의 반 칩에서 고르세요.`:`<b>반을 고르면</b> 그 반의 응시를 줄마다 버튼 하나로 열고 닫을 수 있습니다. '전체'에서는 시험마다 <b>반별 열기·닫기</b>를 눌러 반을 고릅니다.`}</p>`;
+    h+=`<div class="tbl-wrap mt-wrap" style="margin-top:14px"><table class="mt-table"><thead><tr><th>시험</th><th>상태</th><th class="n">답안</th><th>정답</th><th>전국 자료</th><th><span class="sr">할 일</span></th></tr></thead><tbody>${ts.map(mtRow).join('')}</tbody></table></div>`;
+  }
   h+='</div>';
   {const x={...SITE_DEFAULT,...(S.site||{})};h+=`<div class="card"><h3>사이트 제목</h3><p class="sub" style="margin-bottom:10px">학생 화면과 교사 화면 맨 위에 보이는 제목과 그 위의 작은 설명 줄입니다.</p><div class="row" style="align-items:flex-end"><label class="f" style="flex:1;min-width:160px">제목<input type="text" id="siteTitle" maxlength="40" value="${esc(x.title)}"></label><label class="f" style="flex:2;min-width:200px">학생 화면 설명 줄<input type="text" id="siteStu" maxlength="60" value="${esc(x.student_subtitle)}"></label><label class="f" style="flex:2;min-width:200px">교사 화면 설명 줄<input type="text" id="siteTch" maxlength="60" value="${esc(x.teacher_subtitle)}"></label><button class="btn primary" data-act="site-save">제목 저장</button></div></div>`}
   h+=`<p class="note">반 만들기, 학생 명단, 비밀번호 초기화는 위쪽 <button class="btn small" data-act="tab" data-v="classes">반 관리</button> 탭으로 옮겼습니다.</p>`;
@@ -282,12 +357,13 @@ function viewManage(){
     const it=D().tests[S.importTest];
     const pv=S.importPreview;
     h+=`<div class="grid2"><div class="card"><h3>종이 답안 입력</h3>
-      <p class="sub" style="margin-bottom:10px">한 줄에 한 명씩 <span class="mono">학번 이름 답안</span> 또는 <span class="mono">학번 답안</span>으로 적습니다. 빈 칸은 0으로 적습니다. 반 명단에 있는 학번만 저장되며, 학생이 직접 낸 답안이 있으면 이것으로 바뀝니다.</p>
+      <p class="sub" style="margin-bottom:10px">한 줄에 한 명씩 <span class="mono">학번 이름 답안</span> 또는 <span class="mono">학번 답안</span>으로 적습니다. 빈 칸은 0으로 적습니다. 반 명단에 있는 학번만 저장되며(반은 그 학생의 반으로 저장), 학생이 직접 낸 답안이 있으면 이것으로 바뀝니다.</p>
       <label class="f">이름·답안 줄이 들어갈 회차<select id="impTest" data-act="imp-test">${ts.map(t=>`<option value="${t.id}" ${t.id===S.importTest?'selected':''}>${esc(t.title)}</option>`).join('')}</select></label>
             <textarea id="impText" rows="7" style="margin-top:10px" placeholder="${hasElectives(it)?'20315 김하늘 3152413524135241352413524135241352413524135 언매':'20315 김하늘 315241352413524135241352413524135241352413524'}">${esc(S.importText)}</textarea>
-      <div class="row" style="margin-top:8px"><button class="btn" data-act="imp-parse">확인하기</button>${pv&&pv.ok.length?`<button class="btn primary" data-act="imp-save">${pv.ok.length}명 저장</button>`:''}</div>
-      ${pv?`<div style="margin-top:10px;font-size:13.5px">${pv.ok.map(o=>`<div>✓ ${esc(o.name)} · ${esc(D().tests[o.tid]?.title||'')} · ${o.cnt}문항${o.el?' · '+esc(o.el):''}${o.cls?' · '+esc(o.cls):''}</div>`).join('')}${pv.bad.map(b=>`<div style="color:var(--bad)">✗ ${esc(b)}</div>`).join('')}</div>`:''}
-    </div><div class="card"><h3>${esc(it.title)} 제출 현황</h3>${(()=>{const rs=recordsFor(it.id,'');if(!rs.length)return '<p class="muted">아직 제출된 답안이 없습니다.</p>';return `<div class="tbl-wrap"><table><thead><tr><th>이름</th><th>경로</th><th>제출 시각</th><th></th></tr></thead><tbody>${rs.map(r=>{const cf=S.confirm==='rm:'+r.path+':'+it.id;return `<tr><td>${esc(r.name)}${r.cls?` <span class="muted">${esc(r.cls)}</span>`:''}</td><td>${r.src==='student'?'학생 직접':'교사 입력'}</td><td class="num muted">${r.at?new Date(r.at).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):''}</td><td>${cf?`<span class="confirm"><button class="btn small red" data-act="rm-yes" data-v="${esc(r.path)}">지우기</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:`<button class="btn small ghost" data-act="rm" data-v="${esc(r.path)}">지우기</button>`}</td></tr>`}).join('')}</tbody></table></div>`})()}</div></div>`;
+      <div class="row" style="margin-top:8px"><button class="btn" data-act="imp-parse">확인하기</button>${pv&&pv.ok.length?`<button class="btn primary" data-act="imp-save">${pv.ok.length}명 저장</button>`:''}${pv&&pv.bad.length?`<span class="sub" style="color:var(--bad)">✗ ${pv.bad.length}줄은 저장하지 않습니다</span>`:''}</div>
+      ${S.impResult&&!pv?`<p class="note" role="status" style="margin-top:10px">${esc(S.impResult)}</p>`:''}
+      ${pv?`<div class="imp-pv" role="status">${pv.rows.length?'':'<p class="muted">읽을 줄이 없습니다.</p>'}${pv.rows.map(o=>o.ok?`<div>✓ <span class="muted">${o.line}줄</span> ${esc(o.name)} · ${esc(o.cls||'반 없음')} · ${o.cnt}문항${o.el?' · '+esc(o.el):''}${o.tid!==S.importTest?' · '+esc(sessionLabel(D().tests[o.tid]?.title||'',20)):''}${o.typed?` <span class="muted">(적은 이름 ${esc(o.typed)} → 명단 이름으로 저장)</span>`:''}</div>`:`<div class="bad">✗ <span class="muted">${o.line}줄</span> ${esc(o.sid||o.text)} · ${esc(o.msg)}</div>`).join('')}${pv.dup.length?`<p class="note" style="margin-top:8px"><b>같은 학번이 두 줄 이상 있습니다(${esc(pv.dup.join(', '))}).</b> 어느 줄이 맞는지 알 수 없어 그 학번은 저장하지 않습니다. 한 줄만 남기고 다시 <b>확인하기</b>를 눌러 주세요.</p>`:''}</div>`:''}
+    </div><div class="card"><h3>${esc(it.title)} 제출 현황</h3>${(()=>{const rs=recordsFor(S.importTest,'');/* D().tests[id]에는 id 칸이 없다(전에는 it.id라 늘 비어 보였음) */if(!rs.length)return '<p class="muted">아직 제출된 답안이 없습니다.</p>';return `<div class="tbl-wrap"><table><thead><tr><th>이름</th><th>경로</th><th>제출 시각</th><th></th></tr></thead><tbody>${rs.map(r=>{const cf=S.confirm==='rm:'+r.path+':'+S.importTest;return `<tr><td>${esc(r.name)}${r.cls?` <span class="muted">${esc(r.cls)}</span>`:''}</td><td>${r.src==='student'?'학생 직접':'교사 입력'}</td><td class="num muted">${r.at?new Date(r.at).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):''}</td><td>${cf?`<span class="confirm"><button class="btn small red" data-act="rm-yes" data-v="${esc(r.path)}">지우기</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:`<button class="btn small ghost" data-act="rm" data-v="${esc(r.path)}">지우기</button>`}</td></tr>`}).join('')}</tbody></table></div>`})()}</div></div>`;
   }
   h+=`<div class="note"><b>학생에게 나눠 줄 것</b> 이 사이트 주소(교사 화면 말고 첫 화면)뿐입니다. 초기 비밀번호는 학번이고, 학생은 처음 로그인할 때 새 비밀번호를 정합니다. 학생은 학번과 비밀번호로 로그인해 자기 반에 열린 시험에 답을 내고, 결과가 공개되면 자기 결과와 누적 기록을 봅니다.</div></div>`;
   return h;
@@ -322,7 +398,7 @@ document.addEventListener('click',async e=>{
   const b=e.target.closest('[data-act]');if(!b||b.tagName==='SELECT')return;
   const act=b.dataset.act,v=b.dataset.v;
   switch(act){
-    case 'tab':S.tab=v;S.preview=false;S.confirm=null;render();break;
+    case 'tab':S.tab=v;S.preview=false;S.confirm=null;S.bulk=null;render();break;
     case 'sel-test':S.selTest=v;render();break;
     case 'sort':S.sortBy=v;render();break;
     case 'demo-on':if(!(S.session&&S.teacher))break;S.demo=makeDemo();S.selTest=null;render();break;
@@ -331,6 +407,10 @@ document.addEventListener('click',async e=>{
     // '공개 자료 갱신': 이미 결과를 공개한 반의 학생용 반 통계만 다시 계산한다(공개하지 않은 반은 건드리지 않는다).
     case 'release':{const t=D().tests[v];if(!t)break;const tg=(S.cf?[S.cf]:allClasses()).filter(c=>isRel(t,c));if(!tg.length){toast('결과를 공개한 반이 없습니다');break}await api(()=>saveRelStats(v,tg),'공개 자료를 갱신했습니다');break}
     case 'open-ask':S.confirm='open:'+v;render();break;
+    case 'bulk-ask':{const [id,a]=v.split('|');S.bulk={tid:id,act:a,sel:{}};S.confirm=null;render();break}
+    case 'bulk-cancel':S.bulk=null;render();break;
+    case 'bulk-go':await bulkGo();break;
+    case 'mt-exp':S.mtExp=S.mtExp===v?null:v;S.confirm=null;render();break;
     case 'open':{const [id,c]=v.split('|');S.confirm=null;if(!c){toast('반을 먼저 만들어 주세요');break}if(D().tests[id]&&isRel(D().tests[id],c)){toast(c+'에는 이미 결과를 공개했습니다. 다시 열려면 반 분석에서 결과 공개를 먼저 취소하세요');render();break}if(isHiddenCls(c)){toast('숨긴 반에는 응시를 열 수 없습니다. 반 관리에서 다시 보이게 해 주세요');break}// 응시를 연 시험이 '지금 시험'이 되게 반 분석·학생 리포트·종이 답안·내보내기·실시간 현황의 선택을 옮긴다(새로고침하지 않아도).
       if(await api(async()=>chk(await sb.from('test_class').upsert({test_id:id,class_id:clsId(c),is_open:true},{onConflict:'test_id,class_id'})),c+' 응시를 열었습니다')){S.selTest=id;S.importTest=id;S.importPreview=null;if(S.dx)S.dx.tid=id;if(S.lv){S.lv.tid=id;S.lv.at=0}render()}break}
     case 'close':{const [id,c]=v.split('|');await api(async()=>chk(await sb.from('test_class').update({is_open:false,closed_once:true}).eq('test_id',id).eq('class_id',clsId(c))),c+' 응시를 닫았습니다');break}
@@ -354,19 +434,21 @@ document.addEventListener('click',async e=>{
     case 'tag-apply':{S.tagText=$('#tagText').value;const n=parseTags(S.edit,S.tagText);render();toast(n+'문항에 꼬리표를 넣었습니다');break}
     case 'tag-clear':S.edit.tags=[];render();break;
     case 'hid-toggle':S.showHidden=!S.showHidden;lsSet('gb-show-hidden',S.showHidden);render();break;
-    case 'cf':S.cf=v;lsSet('omr-cf',v);S.selStudent=null;render();break;
+    case 'cf':S.cf=v;lsSet('omr-cf',v);S.selStudent=null;S.bulk=null;if(S.stuF)S.stuF.cls='';render();break;
     case 'site-save':{const v2={title:normName($('#siteTitle').value),student_subtitle:normName($('#siteStu').value),teacher_subtitle:normName($('#siteTch').value)};if(!v2.title){toast('제목을 적어 주세요');break}await api(async()=>chk(await sb.from('site_settings').update({...v2,updated_at:nowIso()}).eq('id',1).select()).length||(()=>{throw new Error('설정 표가 없습니다. Supabase에서 최신 schema.sql을 다시 실행해 주세요')})(),'제목을 저장했습니다');break}
     case 'reload':S.ready=false;render();try{await load()}catch(e){toast('불러오지 못했습니다: '+(e?.message||e))}S.ready=true;render();break;
     case 'logout':await sb.auth.signOut();S.session=null;S.teacher=false;S.live={tests:{},keys:{},stats:{},subs:{},manual:{},config:{},roster:{}};render();break;
     case 'edit-save':await saveEdit();break;
-    case 'imp-parse':S.importText=$('#impText').value;S.importPreview=parseImport(S.importText,S.importTest);render();break;
+    case 'imp-parse':S.importText=$('#impText').value;S.importPreview=parseImport(S.importText,S.importTest);S.impResult='';render();break;
     case 'imp-save':await saveImport();break;
   }
 });
 document.addEventListener('change',e=>{
   const el=e.target;
-  if(el.id==='stuSel'){frSwitch('stu',el.value);return}// js/feedback.js: 저장 안 된 한마디가 있으면 먼저 묻는다
-  if(el.id==='impTest'){S.importTest=el.value;S.importPreview=null;render();return}
+  if(el.dataset&&el.dataset.bulkCls!=null&&S.bulk){S.bulk.sel[el.dataset.bulkCls]=el.checked;render();return}
+  if(el.id==='stuSel'){frSwitch('stu',el.value);return}
+  if(el.id==='stuCf'){S.stuF.cls=el.value;const L=recordsFor(S.selTest).filter(r=>!el.value||r.cls===el.value);if(L.length&&!L.some(r=>r.name===S.selStudent)){frSwitch('stu',L[0].name);return}render();return}// js/feedback.js: 저장 안 된 한마디가 있으면 먼저 묻는다
+  if(el.id==='impTest'){S.importTest=el.value;S.importPreview=null;S.impResult='';render();return}
   if(S.edit){const tr=el.closest('tr[data-i]');if(tr&&el.dataset.f){const it=S.edit.items[+tr.dataset.i];it[el.dataset.f]=el.value.trim();if(el.dataset.f==='area'){const ty=$('#ty-'+tr.dataset.i);if(ty)ty.setAttribute('list','dl-'+el.value)}}}
 });
 document.addEventListener('input',e=>{
@@ -377,7 +459,21 @@ document.addEventListener('input',e=>{
   if(el.id==='tagText')S.tagText=el.value;
   if(S.edit){if(el.id==='edTitle')S.edit.title=el.value;if(el.id==='edDate')S.edit.date=el.value;const tr=el.closest('tr[data-i]');if(tr&&el.dataset.f&&el.tagName==='INPUT')S.edit.items[+tr.dataset.i][el.dataset.f]=el.value}
 });
-function afterRender(){}
+function afterRender(){
+  // 시험 칩 상자: 고른 칩이 보이게 스크롤하고, 넘길 것이 있으면 안내 줄을 보인다
+  for(const g of document.querySelectorAll('#app .tp-grid')){
+    const c=g.querySelector('[aria-pressed="true"]');if(c)g.scrollTop=revealScroll(g.scrollTop,g.clientHeight,c.offsetTop,c.offsetHeight);
+    g.classList.toggle('is-scroll',g.scrollHeight>g.clientHeight+2);
+  }
+}
+/* 휴대폰에서 칩을 길게 누르면 전체 제목(data-tip)을 보여 준다. 길게 누른 뒤 손을 떼도 칩이 눌리지 않게 한다. */
+{let lp=null,lpDone=false,p0=null;
+  document.addEventListener('pointerdown',e=>{const el=e.target.closest?.('.tp-chip');if(!el||e.pointerType==='mouse')return;lpDone=false;clearTimeout(lp);p0=[e.clientX,e.clientY];
+    lp=setTimeout(()=>{lpDone=true;showTip({target:el,clientX:p0[0],clientY:p0[1]});setTimeout(()=>{const t=$('#tip');if(t)t.hidden=true},2500)},500)});
+  document.addEventListener('pointermove',e=>{if(p0&&Math.hypot(e.clientX-p0[0],e.clientY-p0[1])>10)clearTimeout(lp)},true);
+  for(const ev of ['pointerup','pointercancel'])document.addEventListener(ev,()=>{clearTimeout(lp);p0=null},true);
+  document.addEventListener('click',e=>{if(lpDone&&e.target.closest?.('.tp-chip')){lpDone=false;e.stopImmediatePropagation();e.preventDefault()}},true);
+  document.addEventListener('contextmenu',e=>{if(e.target.closest?.('.tp-chip'))e.preventDefault()});}
 
 /* ---------- 저장 동작 ---------- */
 async function saveEdit(){
@@ -398,33 +494,26 @@ async function saveEdit(){
 let confirmItems=false;
 /* parseNat·parseEx는 js/logic.js에 있다(테스트에서도 같은 코드를 쓴다). */
 function parseTags(E,text){let n=0;for(const raw of text.split(/\n/)){const m=raw.trim().match(/^(\d{1,2})[번.]?\s+(.+)$/);if(!m)continue;const i=E.items.findIndex(it=>String(it.no)===m[1]&&!it.el);if(i<0)continue;const rest=m[2].replace(/(^|[\s,;\/])([1-5])\s*[:：)]\s*/g,(x,p,d)=>p+CIR[+d]);const o={};for(const part of rest.split(/(?=[①②③④⑤])/)){const k=CIR.indexOf(part[0]);if(k<1)continue;const tg=part.slice(1).replace(/^[\s:：]+/,'').replace(/[\s,;\/]+$/,'').trim();if(tg&&String(k)!==E.key[i])o[k]=tg}if(Object.keys(o).length){E.tags[i]=o;n++}}return n}
+/* 종이 답안 미리 보기: 줄마다 판정은 js/tools-logic.js importPlan(명단의 실제 반, 명단에 없는 학번·같은 학번 두 줄은 ✗).
+   명단 = 반이 있는 학생(rosterIndex) + 반 없는 학생(S.idx, 실제 자료일 때). */
+function impRoster(){const o={};for(const x of Object.values(S.idx.studentById||{}))o[x.sid]={name:x.name,cls:''};
+  for(const [sid,p] of Object.entries(rosterIndex()))o[sid]={name:p.name,cls:p.cls};return o}
 function parseImport(text,tid){
-  const ok=[],bad=[];
-  for(const raw of text.split(/\n/)){const line=raw.trim();if(!line)continue;
-    if(line.startsWith('KORA1.')){try{const o=JSON.parse(unb64u(line.slice(6)));const t=D().tests[o.t];if(!t){bad.push('없는 시험의 코드: '+line.slice(0,16)+'…');continue}ok.push({name:normName(o.n),tid:o.t,a:String(o.a).slice(0,t.items.length).padEnd(t.items.length,'0'),el:o.e||'',cls:o.c||'',at:o.at||Date.now(),src:'code',cnt:applicable(t,o.e||'').filter(i=>o.a[i]&&o.a[i]!=='0').length})}catch(e){bad.push('코드를 읽지 못함: '+line.slice(0,16)+'…')}continue}
-    const t=D().tests[tid];const toks=line.split(/[\s,\t]+/);let el='';
-    const ei=toks.findIndex(x=>/^(화작|언매|화법과작문|언어와매체)$/.test(x));if(ei>=0){el=/화/.test(toks[ei])?'화작':'언매';toks.splice(ei,1)}
-    const ans=toks.pop()||'';let name=normName(toks.join(' '));{const ro=rosterIndex()[ident(name)];if(ro)name=ro.id+' '+ro.name}
-    if(!name||!/^[0-5.]+$/.test(ans)){bad.push(line.slice(0,20)+' (이름 뒤에 답안 숫자가 필요합니다)');continue}
-    if(hasElectives(t)&&!el){bad.push(name+': 화작 또는 언매를 적어 주세요');continue}
-    const idx=applicable(t,el);const ds=ans.replace(/\./g,'0');
-    if(ds.length!==idx.length){bad.push(`${name}: 답안 ${ds.length}개, 필요한 수 ${idx.length}개`);continue}
-    const arr=Array(t.items.length).fill('0');idx.forEach((i,k)=>arr[i]=ds[k]);
-    ok.push({name,tid,a:arr.join(''),el,cls:classes().length?(S.impCls||classes()[0]):'',at:Date.now(),src:'teacher',cnt:idx.length});
-  }
-  return {ok,bad};
+  const tests={};for(const [id,t] of Object.entries(D().tests))tests[id]={title:t.title,items:t.items};
+  return importPlan(text,{tid,tests,roster:impRoster(),decode:x=>JSON.parse(unb64u(x))});
 }
 async function saveImport(){
   const pv=S.importPreview;if(!pv)return;
   if(S.demo){toast('예시 데이터에서는 저장되지 않습니다');return}
-  const miss=[],rows=[];
-  for(const o of pv.ok){const st=S.idx.studentBySid[ident(o.name)];if(!st){miss.push(o.name);continue}rows.push({test_id:o.tid,student_id:st.id,answers:o.a,src:'teacher',submitted_at:nowIso()})}
-  if(miss.length)toast('명단에 없는 학번이라 건너뜀: '+miss.join(', '));
-  if(!rows.length)return;
+  const skipped=pv.bad.map(r=>({sid:r.sid,line:r.line})),rows=[];
+  for(const o of pv.ok){const st=S.idx.studentBySid[o.sid];if(!st){skipped.push({sid:o.sid,line:o.line});continue}rows.push({test_id:o.tid,student_id:st.id,answers:o.a,src:'teacher',submitted_at:nowIso()})}
+  if(!rows.length){S.impResult=importResultMsg(0,skipped);toast(S.impResult);render();return}
   const rel=await impReleasedAsk(rows);if(rel===null)return;// 결과를 공개한 반 학생이 있으면 먼저 묻는다
-  const ok=await api(async()=>chk(await sb.from('submissions').upsert(rows,{onConflict:'test_id,student_id'})),rows.length+'명의 답안을 저장했습니다');
-  if(ok){S.importText='';S.importPreview=null;render()}
-  if(ok&&rel.length)await api(async()=>{for(const [tid,cs] of rel)await saveRelStats(tid,cs)},rows.length+'명의 답안을 저장하고 공개 자료도 갱신했습니다');
+  // 결과 알림은 저장(과 공개 자료 갱신)이 모두 끝난 뒤 한 번만: 'N명 저장, M명 건너뜀(학번…)'
+  const ok=await api(async()=>chk(await sb.from('submissions').upsert(rows,{onConflict:'test_id,student_id'})));
+  if(!ok)return;
+  let extra='';if(rel.length)extra=(await api(async()=>{for(const [tid,cs] of rel)await saveRelStats(tid,cs)}))?'공개 자료도 갱신했습니다':'공개 자료는 갱신하지 못했습니다';
+  S.importText='';S.importPreview=null;S.impResult=importResultMsg(rows.length,skipped,extra);render();toast(S.impResult);
 }
 /* 이미 결과를 공개한 반의 학생용 반 통계(반 평균·문항 정답률)를 지금 답안으로 다시 계산해 저장한다. 공개 여부·공개 시각은 그대로 둔다. */
 async function saveRelStats(tid,cs){

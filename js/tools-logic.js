@@ -1,7 +1,7 @@
 "use strict";
 /* 근본국어 교사 도구(실시간 현황·내보내기·익명화·파일로 시험 만들기)의 순수 함수. 화면(DOM) 없이 돌아가며 tests/tools.test.js가 확인한다.
    브라우저에서는 logic.js 다음에 불러온다(parseNat·parseEx를 그대로 쓴다). */
-const TL_LOGIC=(typeof parseNat==='function')?{parseNat,parseEx}:require('./logic.js');
+const TL_LOGIC=(typeof parseNat==='function')?{parseNat,parseEx,sessionLabel}:require('./logic.js');
 
 /* ---------- 채점 (core.js의 grade와 같은 규칙: 정답이 비어 있거나 '0'이면 오답, 선택과목이 다르면 제외) ---------- */
 function tlApplicable(items,el){return items.map((it,i)=>(!it.el||it.el===el)?i:-1).filter(i=>i>=0)}
@@ -226,4 +226,91 @@ function groupKey(key,n=5){const s=String(key||'');const out=[];for(let i=0;i<s.
 /* 정답 풀어 쓰기(마우스를 올리거나 누르면): '1번 5, 2번 2, …'. items가 있으면 그 문항 번호를 쓴다. */
 function keyTip(key,items){return Array.from(String(key||''),(d,i)=>`${items&&items[i]?items[i].no:i+1}번 ${d==='0'?'?':d}`).join(', ')}
 
-if(typeof module!=='undefined'&&module.exports)module.exports={clsOpen,clsRel,clsClosed,testStatus,submitTargets,submitStatus,splitTestChips,pickDefaultTest,groupKey,keyTip,tlGrade,csvCell,toCsv,CSV_BOM,safeFileName,testCsvRows,classCumRows,classAnswerRows,anonPlan,isAnon,liveBoard,sortBoard,pairSessionFiles,sessionTitle,sessionEntry};
+/* ---------- 시험 칩 (반 분석·학생 리포트·실시간 현황이 같은 칩을 쓴다) ---------- */
+/* 칩 글: 'N차시'만. 차시가 없으면 끝의 괄호 메모를 떼고 짧게('3월 학력평가 (예시)' → '3월 학력평가'). 전체 제목은 칩의 title·data-tip으로. */
+function chipLabel(title,max=12){
+  const s=String(title??'').trim();if(/\d+\s*차시/.test(s))return TL_LOGIC.sessionLabel(s);
+  const t=s.replace(/\s*[\(\[][^\)\]]*[\)\]]\s*$/,'').trim()||s;
+  return t.length>max?t.slice(0,max)+'…':t;
+}
+/* 칩 상자(2줄 높이, 안에서 위아래로 넘김)에서 고른 칩이 보이게 할 scrollTop. 이미 보이면 지금 값 그대로.
+   cur: 지금 scrollTop, viewH: 상자 보이는 높이, top·h: 상자 안에서 칩의 위치·높이 */
+function revealScroll(cur,viewH,top,h){
+  if(top<cur)return Math.max(0,top);
+  if(top+h>cur+viewH)return Math.max(0,top+h-viewH);
+  return cur;
+}
+
+/* ---------- 종이 답안 입력 미리 보기 ---------- */
+/* text: 붙여넣은 글. 한 줄에 '학번 이름 답안' 또는 '학번 답안'(선택과목 시험은 화작/언매도), 또는 학생 화면이 만든 'KORA1.' 코드.
+   o.tid: 고른 회차 id, o.tests {id:{title,items}}, o.roster {학번:{name,cls}} (반 없는 학생은 cls ''),
+   o.decode: 'KORA1.' 뒤 글 → {n,t,a,e,at} (브라우저에서 넘겨 준다), o.now: 시각(ms).
+   돌려주는 값 rows(줄 순서) [{line,ok,sid,name,cls,tid,a,el,at,cnt,typed,msg}], ok(저장할 줄), bad(저장하지 않을 줄), dup(두 번 이상 나온 학번).
+   - 명단에 없는 학번, 학번이 없는 줄은 ✗(저장하지 않음). 반은 고른 반이 아니라 그 학생의 실제 반.
+   - 같은 시험에 같은 학번이 두 줄 이상이면 어느 쪽이 맞는지 알 수 없으므로 그 줄을 모두 ✗로 두고 줄 번호를 알려 준다(한 줄만 남기고 다시 확인). */
+function importPlan(text,o){
+  const tests=o.tests||{},roster=o.roster||{},now=o.now||Date.now();
+  const rows=[];
+  String(text||'').replace(/^﻿/,'').split(/\r?\n/).forEach((raw,k)=>{
+    const line=raw.trim();if(!line)return;const no=k+1;const short=line.length>24?line.slice(0,24)+'…':line;
+    const bad=(msg,x)=>rows.push({line:no,ok:false,text:short,msg,...(x||{})});
+    let tid=o.tid,typed='',a='',el='',at=now,cnt=0;
+    if(line.startsWith('KORA1.')){
+      let c;try{c=o.decode(line.slice(6))}catch(e){c=null}
+      if(!c||typeof c!=='object'){bad('학생 화면 코드를 읽지 못했습니다');return}
+      const t=tests[c.t];if(!t){bad('없는 시험의 코드입니다');return}
+      tid=c.t;typed=String(c.n||'').trim().replace(/\s+/g,' ');el=c.e||'';at=+c.at||now;
+      const ap=tlApplicable(t.items,el);const ans=String(c.a||'');
+      a=ans.slice(0,t.items.length).padEnd(t.items.length,'0');cnt=ap.filter(i=>ans[i]&&ans[i]!=='0').length;
+    }else{
+      const t=tests[tid];if(!t){bad('회차를 먼저 고르세요');return}
+      const toks=line.split(/[\s,\t]+/);
+      const ei=toks.findIndex(x=>/^(화작|언매|화법과작문|언어와매체)$/.test(x));if(ei>=0){el=/화/.test(toks[ei])?'화작':'언매';toks.splice(ei,1)}
+      const ans=toks.pop()||'';typed=toks.join(' ').trim();
+      if(!typed||!/^[0-5.]+$/.test(ans)){bad('학번 뒤에 답안 숫자가 필요합니다');return}
+      const ap=tlApplicable(t.items,el);const hasEl=t.items.some(it=>it.el);
+      if(hasEl&&!el){bad('화작 또는 언매를 적어 주세요',{sid:(typed.match(/\d{5}/)||[])[0]||''});return}
+      const ds=ans.replace(/\./g,'0');
+      if(ds.length!==ap.length){bad(`답안 ${ds.length}개, 필요한 수 ${ap.length}개`,{sid:(typed.match(/\d{5}/)||[])[0]||''});return}
+      const arr=Array(t.items.length).fill('0');ap.forEach((i,j)=>arr[i]=ds[j]);a=arr.join('');cnt=ap.length;
+    }
+    const m=typed.match(/(?:^|\D)(\d{5})(?!\d)/);const sid=m?m[1]:'';
+    if(!sid){bad('학번(숫자 5자리)이 없습니다');return}
+    const ro=roster[sid];if(!ro){bad('명단에 없는 학번',{sid});return}
+    const nm=typed.replace(sid,'').trim();
+    rows.push({line:no,ok:true,sid,name:sid+' '+ro.name,cls:ro.cls||'',tid,a,el,at,cnt,typed:nm&&nm!==ro.name?nm:''});
+  });
+  const seen={};for(const r of rows)if(r.ok)(seen[r.tid+'|'+r.sid]=seen[r.tid+'|'+r.sid]||[]).push(r.line);
+  const dup=[];
+  for(const r of rows){if(!r.ok)continue;const ls=seen[r.tid+'|'+r.sid];if(ls.length<2)continue;
+    if(!dup.includes(r.sid))dup.push(r.sid);
+    Object.assign(r,{ok:false,msg:`같은 학번이 ${ls.join('·')}번째 줄에 있습니다. 한 줄만 남기고 다시 확인해 주세요`})}
+  return {rows,ok:rows.filter(r=>r.ok),bad:rows.filter(r=>!r.ok),dup};
+}
+/* 종이 답안 저장 결과 한 줄: '3명 저장, 2명 건너뜀(91999, 20315)'. skipped: 건너뛴 줄 [{sid,line}] */
+function importResultMsg(saved,skipped,extra){
+  const L=skipped||[];const ids=[...new Set(L.map(x=>x.sid||(x.line+'번째 줄')))];
+  return `${saved}명 저장`+(ids.length?`, ${ids.length}명 건너뜀(${ids.join(', ')})`:'')+(extra?' · '+extra:'');
+}
+
+/* ---------- 여러 반 한꺼번에 (시험 관리·반 분석 '전체') ---------- */
+/* act: 'open' 응시 열기 | 'close' 응시 닫기 | 'release' 결과 공개(응시도 닫힘) | 'key' 정답·해설 공개(결과 공개한 반만).
+   classes: 대상 후보 반, o {recs:{반:답안 수}, lists:{반:[{id,name}]}, done:Set(답안 있는 학번), keyRel(반)→bool, hidden:[반], keyMissing:bool}
+   돌려주는 값 [{cls,ok,why,n,miss,size}] — ok=이 동작을 할 수 있는 반(확인 상자에서 처음부터 체크), why=못 하는 까닭, miss=아직 안 낸 학생 수(submitStatus). */
+function bulkPlan(act,t,classes,o){
+  o=o||{};const done=o.done instanceof Set?o.done:new Set(o.done||[]);
+  return (classes||[]).map(c=>{
+    const rel=clsRel(t,c),op=clsOpen(t,c),kr=rel&&!!(o.keyRel&&o.keyRel(c)),n=(o.recs&&o.recs[c])||0;
+    const SS=submitStatus(t,[c],o.lists||{},done);const size=((o.lists&&o.lists[c])||[]).length;
+    let why='';
+    if((o.hidden||[]).includes(c))why='숨긴 반';
+    else if(act==='open')why=rel?'이미 결과 공개':op?'이미 응시 중':'';
+    else if(act==='close')why=op?'':'응시 중이 아님';
+    else if(act==='release')why=rel?'이미 결과 공개':o.keyMissing?'정답이 비어 있음':!n?'낸 답안 없음':'';
+    else if(act==='key')why=!rel?'결과 공개 전':kr?'이미 정답·해설 공개':'';
+    return {cls:c,ok:!why,why,n,miss:SS.miss.length,size};
+  });
+}
+const BULK_LABEL={open:'응시 열기',close:'응시 닫기',release:'결과 공개',key:'정답·해설 공개'};
+
+if(typeof module!=='undefined'&&module.exports)module.exports={bulkPlan,BULK_LABEL,chipLabel,revealScroll,importPlan,importResultMsg,clsOpen,clsRel,clsClosed,testStatus,submitTargets,submitStatus,splitTestChips,pickDefaultTest,groupKey,keyTip,tlGrade,csvCell,toCsv,CSV_BOM,safeFileName,testCsvRows,classCumRows,classAnswerRows,anonPlan,isAnon,liveBoard,sortBoard,pairSessionFiles,sessionTitle,sessionEntry};
