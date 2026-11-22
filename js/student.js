@@ -137,7 +137,7 @@ document.addEventListener('submit',async e=>{
   const r=await sb.rpc('student_login',{p_sid:$('#lgSid').value.trim(),p_password:$('#lgCode').value.trim()});
   if(r.error){msg.textContent='서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요.';return}
   const d=r.data||{};
-  if(!d.ok){msg.textContent=loginErrorMsg(d.error);return}
+  if(!d.ok){msg.textContent=loginErrorMsg(d.error,d.until);return}
   saveToken(d.token,{sid:d.sid,name:d.name});T.msg='';T.pwMsg='';T.view='home';
   if(d.must_change){T.mustChange=true;render();return}
   try{await refreshHome();render()}catch(err){}
