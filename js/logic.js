@@ -96,7 +96,9 @@ function rosterPlan(text,cls,students){
     const short=line.length>40?line.slice(0,40)+'…':line;
     const m=line.match(/(?:^|\D)(\d{5})(?!\d)/);
     if(!m){
-      if(/(?:^|\D)\d{4}(?!\d)|(?:^|\D)\d{6,}/.test(line)&&/[가-힣]{2}/.test(line)&&!/\d{4}[-./]\d{1,2}[-./]\d{1,2}/.test(line))P.errors.push({line:no,text:short,msg:'학번은 숫자 5자리여야 합니다'});
+      // 신청시간 같은 날짜(2026-09-16)는 지우고 본다. 날짜가 있는 줄의 4자리 학번 오타도 놓치지 않게.
+      const nd=line.replace(/\d{4}[-./]\d{1,2}[-./]\d{1,2}/g,' ');
+      if(/(?:^|\D)\d{4}(?!\d)|(?:^|\D)\d{6,}/.test(nd)&&/[가-힣]{2}/.test(line))P.errors.push({line:no,text:short,msg:'학번은 숫자 5자리여야 합니다'});
       else P.skipped.push({line:no,text:short});
       return}
     const sid=m[1];const after=line.slice(m.index+m[0].length);

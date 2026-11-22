@@ -65,3 +65,11 @@ test('시험 순서: 시행일 → 제목(숫자 인식) → 만든 시각',()=>
   const same=[{title:'같음',date:'',created:'2'},{title:'같음',date:'',created:'1'}].sort(testOrder);
   assert.deepEqual(same.map(x=>x.created),['1','2']);
 });
+
+test('신청시간(날짜)이 있는 줄의 4자리 학번 오타도 고칠 줄로 알려 준다',()=>{
+  const P=rosterPlan(['순번\t학번\t이름\t신청시간',
+    '1\t2010\t가나다\t2026-09-16 16:30:02',
+    '2026-09-16 신청 마감'].join('\n'),'화목반',[]);
+  assert.deepEqual(P.errors.map(x=>x.line),[2]);
+  assert.deepEqual(P.skipped.map(x=>x.line),[1,3],'머리글·날짜만 있는 줄은 건너뜀');
+});
