@@ -120,8 +120,11 @@ function rosterPlan(text,cls,students){
 /* 반 숨기기: 화면에 보일 반 이름 목록. all=전체 반(만든 순서), hidden=숨긴 반 이름, show=숨긴 반도 보기 */
 function visibleClasses(all,hidden,show){const h=new Set(hidden||[]);return (all||[]).filter(c=>show||!h.has(c))}
 /* 학생 로그인 실패 코드 → 학생에게 보여 줄 말 */
-function loginErrorMsg(code){
-  return {locked:'여러 번 틀려서 10분 동안 잠겼습니다. 잠시 뒤 다시 시도해 주세요.',
+/* until: 서버 student_login이 'locked'와 함께 주는 잠금 해제 시각(있으면 'HH:MM 뒤에'로 알려 준다. 잠금 시간을 바꿔도 맞게) */
+function loginErrorMsg(code,until){
+  const u=until?new Date(until):null;
+  if(code==='locked'&&u&&!isNaN(u))return `여러 번 틀려서 잠겼습니다. ${String(u.getHours()).padStart(2,'0')}:${String(u.getMinutes()).padStart(2,'0')} 뒤에 다시 시도해 주세요. 급하면 선생님께 잠금을 풀어 달라고 하세요.`;
+  return {locked:'여러 번 틀려서 10분 동안 잠겼습니다. 잠시 뒤 다시 시도해 주세요. 급하면 선생님께 잠금을 풀어 달라고 하세요.',
     class_hidden:'수업이 끝난 반이라 로그인할 수 없습니다. 선생님께 문의하세요.'}[code]
     ||'학번 또는 비밀번호가 맞지 않습니다. 비밀번호를 잊었으면 선생님께 초기화를 부탁하세요.';
 }
@@ -163,4 +166,21 @@ function sessionLabel(title,max=9){
   return s.length>max?s.slice(0,max)+'…':s;
 }
 
-if(typeof module!=='undefined'&&module.exports)module.exports={sessionLabel,testOrder,visibleClasses,loginErrorMsg,rosterPlan,parseNat,parseEx,parseRanges,pwProblem,PW_MIN,EX_MAX,explainPriority};
+/* 변별도(상위 27% 정답률 − 하위 27% 정답률): 응시 인원이 이 수보다 적으면 계산하지 않는다(몇 명의 실수로 크게 흔들려 참고하기 어렵다). */
+const DISC_MIN_N=15;
+/* 변별도용 순위: 점수 비율 높은 순 → 원점수 높은 순 → 이름(학번이 앞에 붙음) 순. 같은 점수끼리도 늘 같은 순서가 되게 한다. */
+function discRank(graded){
+  const nm=x=>String(x.name??'');
+  return [...(graded||[])].sort((a,b)=>(b.pct-a.pct)||((b.score||0)-(a.score||0))||(nm(a)<nm(b)?-1:nm(a)>nm(b)?1:0));
+}
+/* 문항별 변별도 [수|null] (길이 n). graded [{pct,score,name,res:{문항자리:맞음?}}]. 응시 DISC_MIN_N명 미만이면 모두 null. */
+function itemDisc(graded,n){
+  const out=Array.from({length:n||0},()=>null);const L=graded||[];
+  if(L.length<DISC_MIN_N)return out;
+  const s=discRank(L);const k=Math.max(1,Math.round(s.length*.27));const up=s.slice(0,k),lo=s.slice(-k);
+  const rate=(g,i)=>{const a=g.filter(x=>x.res&&x.res[i]!==undefined);return a.length?a.filter(x=>x.res[i]).length/a.length:null};
+  for(let i=0;i<out.length;i++){const ru=rate(up,i),rl=rate(lo,i);out[i]=ru!=null&&rl!=null?ru-rl:null}
+  return out;
+}
+
+if(typeof module!=='undefined'&&module.exports)module.exports={sessionLabel,testOrder,visibleClasses,loginErrorMsg,rosterPlan,parseNat,parseEx,parseRanges,pwProblem,PW_MIN,EX_MAX,explainPriority,DISC_MIN_N,discRank,itemDisc};

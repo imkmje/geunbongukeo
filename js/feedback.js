@@ -33,11 +33,13 @@ function frStagePanel(t,keyMissing){
   if(!cs.length)return `<p class="note" style="margin-top:12px">반을 만들면 반마다 결과 공개 → 다시 풀기 → 정답·해설 공개를 진행할 수 있습니다. <button class="btn small" data-act="tab" data-v="classes">반 관리</button></p>`;
   const key=keyOf(t.id);
   return `<div class="stage-list">${cs.map(c=>{
-    const rel=isRel(t,c),kr=rel&&frKeyRel(t.id,c),open=isOpen(t,c);const pg=frProgress(t.id,key,recordsFor(t.id,c));
-    const steps=stageSteps({open,rel,kr,closed:!!t.closedOnce,...pg});const v=esc(t.id+'|'+c);
+    const rel=isRel(t,c),kr=rel&&frKeyRel(t.id,c),open=isOpen(t,c),closed=isClosed(t,c);const rs=recordsFor(t.id,c);const pg=frProgress(t.id,key,rs);
+    const steps=stageSteps({open,rel,kr,closed,...pg});const v=esc(t.id+'|'+c);
+    // 결과 공개는 낸 답안이 있어야 누를 수 있다(한 번도 안 연 반·아무도 안 낸 반은 공개할 것이 없다).
+    const noRel=keyMissing?'정답을 모두 입력해야 공개할 수 있습니다':!rs.length?(open||closed?'이 반에 낸 답안이 아직 없습니다':'이 반은 아직 응시를 연 적이 없습니다'):'';
     // '결과 공개 취소'는 자주 쓰지 않고 되돌리기 어려우니 '⋯ 더보기' 안에 둔다(누르면 확인 상자가 한 번 더 뜬다).
     const undo=moreMenu(`${kr?`<button class="btn ghost small" data-act="fr-key-undo" data-v="${v}">정답·해설 공개 취소</button>`:''}<button class="btn ghost small danger" data-act="fr-unrelease" data-v="${v}">결과 공개 취소</button>`,(c?c+' ':'')+'공개 취소 메뉴','⋯ 더보기');
-    const btns=isHiddenCls(c)?'<span class="badge">숨긴 반</span>':!rel?`<button class="btn red small" data-act="fr-release" data-v="${v}" ${keyMissing?'disabled title="정답을 모두 입력해야 공개할 수 있습니다"':''}>결과 공개</button>`
+    const btns=isHiddenCls(c)?'<span class="badge">숨긴 반</span>':!rel?`<button class="btn red small" data-act="fr-release" data-v="${v}" ${noRel?`disabled title="${esc(noRel)}"`:''}>결과 공개</button>${noRel&&!keyMissing?`<span class="sub">${esc(noRel)}</span>`:''}`
       :!kr?`<button class="btn primary small" data-act="fr-key" data-v="${v}">정답·해설 공개</button>${undo}`
       :`<span class="badge good">정답·해설 공개됨</span>${undo}`;
     return `<div class="stage-row">${c?`<b class="stage-cls">${esc(c)}</b>`:''}<ol class="stage">${steps.map((s,i)=>`<li class="st-${s.state}"><span class="st-n">${s.state==='done'?'✓':i+1}</span>${esc(s.label)}</li>`).join('')}</ol><div class="row stage-btns">${btns}</div></div>`}).join('')}</div>${frNowLine(t)}${frMissing()}`;
@@ -46,12 +48,12 @@ function frStagePanel(t,keyMissing){
 /* ----- 반 분석 맨 위 '지금 할 일' 한 줄 (B1) ----- */
 function frNowLine(t){
   const cs=(S.cf?[S.cf]:liveClasses()).filter(c=>!isHiddenCls(c));if(!cs.length)return '';
-  const key=keyOf(t.id);const rl=rosterLists();
+  const key=keyOf(t.id);
   const line=(msg,extra='')=>`<p class="now-line" role="status"><b>지금 할 일</b> ${msg}${extra}</p>`;
-  const openCs=cs.filter(c=>isOpen(t,c));
-  if(openCs.length){const pool=openCs.flatMap(c=>(rl[c]||[]).map(p=>p.id));const done=new Set(openCs.flatMap(c=>recordsFor(t.id,c)).map(r=>ident(r.name)));
-    const n=pool.filter(id=>done.has(id)).length,m=pool.length;
-    return line(`제출 ${n}/${m}명 · ${m&&n>=m?'모두 냈습니다. 응시를 닫으세요':'다 내면 응시를 닫으세요'}`)}
+  // 응시 중(결과 공개 전) 반이 있으면 제출 현황. 수는 반 분석 '제출 현황'·실시간 현황과 같은 함수로 센다(teacher.js subStatus).
+  const SS=subStatus(t,cs);
+  if(SS.openClasses.length){const allIn=!SS.openMiss.length;
+    return line(`제출 ${SS.n}/${SS.m}명 · ${allIn?(SS.openClasses.length<SS.classes.length?'응시 중인 반은 모두 냈습니다. 응시를 닫으세요':'모두 냈습니다. 응시를 닫으세요'):'다 내면 응시를 닫으세요'}`)}
   const retryCs=cs.filter(c=>isRel(t,c)&&!frKeyRel(t.id,c));
   if(retryCs.length){const recs=retryCs.flatMap(c=>recordsFor(t.id,c));const pg=frProgress(t.id,key,recs);
     const rts=recs.map(r=>FR.rt[t.id+'|'+frSid(r)]?.answers).filter(Boolean);
@@ -226,14 +228,19 @@ async function fbNext(k){
 async function frStage(act,v){
   const [tid,c]=v.split('|');const t=D().tests[tid];if(!t)return;
   const key=keyOf(tid);const pg=frProgress(tid,key,recordsFor(tid,c));const left=pg.due-pg.done;
-  const Q={'fr-release':{title:`${c} 결과 공개`,msg:'학생에게 점수와 문항별 맞음/틀림만 보이고, 틀린 문항을 한 번 다시 풀 수 있게 됩니다(정답·해설은 아직 숨김).',ok:'결과 공개'},
+  const relMsg=()=>{const base='학생에게 점수와 문항별 맞음/틀림만 보이고, 틀린 문항을 한 번 다시 풀 수 있게 됩니다(정답·해설은 아직 숨김).';
+    if(!isOpen(t,c))return base;// 응시가 열려 있을 때만: 공개하면 응시가 닫히고 못 낸 학생은 더 낼 수 없다(서버 student_submit 규칙)
+    const miss=subStatus({id:tid,...t},[c]).miss;
+    return base+(miss.length?` 이 반은 응시가 닫히고, 아직 못 낸 학생 ${miss.length}명(${miss.map(sidName).join(', ')})은 더 낼 수 없습니다.`:' 이 반은 응시가 닫힙니다(모두 냈습니다).')};
+  const Q={'fr-release':{title:`${c} 결과 공개`,msg:act==='fr-release'?relMsg():'',ok:'결과 공개'},
     'fr-key':{title:`${c} 정답·해설 공개`,msg:`학생에게 정답·해설·다시 풀기 결과·선생님 한마디가 보이고, 이제부터는 다시 풀기를 낼 수 없습니다.${left>0?` (아직 다시 풀지 않은 학생 ${left}명)`:''}`,ok:'정답·해설 공개'},
     'fr-key-undo':{title:`${c} 정답·해설 공개 취소`,msg:'학생 화면에서 정답·해설·한마디가 다시 숨겨지고, 아직 다시 풀지 않은 학생은 다시 풀 수 있게 됩니다.',ok:'공개 취소'},
     'fr-unrelease':{title:`${c} 결과 공개 취소`,msg:'학생 화면에서 이 시험 결과가 사라지고, 정답·해설 공개도 함께 취소됩니다. 다시 풀기 기록은 남습니다.',ok:'공개 취소',danger:true}}[act];
   if(!(await ask(Q)))return;
   const cid=clsId(c);
-  if(act==='fr-release'){const rs=recordsFor(tid,c);const stats=rs.length?toStats(analyze(t,key,rs)):null;
-    await api(async()=>chk(await sb.from('test_class').upsert({test_id:tid,class_id:cid,released:true,released_at:nowIso(),stats},{onConflict:'test_id,class_id'})),c+'에 결과를 공개했습니다')}
+  if(act==='fr-release'){const rs=recordsFor(tid,c);if(!rs.length){toast('이 반에 낸 답안이 없어 공개할 결과가 없습니다');return}const stats=toStats(analyze(t,key,rs));
+    // 공개하면 응시도 닫는다(학생은 이미 더 낼 수 없으므로 교사 화면과 서버 상태를 맞춘다)
+    await api(async()=>chk(await sb.from('test_class').upsert({test_id:tid,class_id:cid,released:true,released_at:nowIso(),stats,is_open:false,closed_once:true},{onConflict:'test_id,class_id'})),c+'에 결과를 공개했습니다')}
   else if(act==='fr-key')await api(async()=>chk(await sb.from('test_class').update({key_released:true,key_released_at:nowIso()}).eq('test_id',tid).eq('class_id',cid)),c+'에 정답·해설을 공개했습니다');
   else if(act==='fr-key-undo')await api(async()=>chk(await sb.from('test_class').update({key_released:false,key_released_at:null}).eq('test_id',tid).eq('class_id',cid)),'정답·해설 공개를 취소했습니다');
   else await api(async()=>chk(await sb.from('test_class').update({released:false,released_at:null,stats:null,key_released:false,key_released_at:null}).eq('test_id',tid).eq('class_id',cid)),'결과 공개를 취소했습니다');

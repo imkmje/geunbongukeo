@@ -4,25 +4,36 @@
 const NONE='__none';// '반 없음' 학생 모음을 가리키는 값
 function MG(){return S.mg||(S.mg={cls:lsGet('gb-mg-cls','')||'',q:'',f:'all',panel:null,text:'',plan:null,drop:false})}
 
-/* 지금 학생 목록 [{uid,sid,name,cls,must,locked}] (cls ''=반 없음) */
+/* 지금 학생 목록 [{uid,sid,name,cls,must,locked,until}] (cls ''=반 없음, until=잠금이 풀리는 시각 ms) */
 function mgStudents(){
   if(S.demo){const out=[];for(const [c,l] of Object.entries(rosterLists()))for(const p of l)out.push({uid:p.id,sid:p.id,name:p.name,cls:c,must:false,locked:false});return out}
   const nameOf={};for(const [n,id] of Object.entries(S.idx.classByName))nameOf[id]=n;
-  return Object.values(S.idx.studentById).map(x=>({uid:x.id,sid:x.sid,name:x.name,cls:nameOf[x.class_id]||'',must:x.must_change_pw!==false,locked:!!x.locked_until&&Date.parse(x.locked_until)>Date.now()})).sort((a,b)=>a.sid.localeCompare(b.sid));
+  return Object.values(S.idx.studentById).map(x=>({uid:x.id,sid:x.sid,name:x.name,cls:nameOf[x.class_id]||'',must:x.must_change_pw!==false,locked:!!x.locked_until&&Date.parse(x.locked_until)>Date.now(),until:Date.parse(x.locked_until||'')||0})).sort((a,b)=>a.sid.localeCompare(b.sid));
 }
 const BADGE={must:['warn','아직 학번 그대로'],own:['good','직접 정함'],locked:['bad','잠김']};
 const badge=k=>`<span class="badge ${BADGE[k][0]}">${BADGE[k][1]}</span>`;
-const pwBadges=s=>(s.must?badge('must'):badge('own'))+(s.locked?' '+badge('locked'):'');
+const hhmm=ms=>new Date(ms).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false});
+const pwBadges=s=>(s.must?badge('must'):badge('own'))+(s.locked?' '+badge('locked')+(s.until?` <span class="sub">잠금 해제 예정 ${esc(hhmm(s.until))}</span>`:''):'');
+/* 잠긴 학생: 비밀번호는 그대로 두고 잠금만 푼다(서버 teacher_unlock_student). 함수가 아직 없으면(SQL 실행 전) 안내만 한다. */
+async function unlockStu(uid){
+  if(S.demo){toast('예시 데이터에서는 바꾸지 않습니다');return}
+  const s=stu(uid);const r=await sb.rpc('teacher_unlock_student',{p_student:uid});
+  if(r.error){const missing=r.error.code==='PGRST202'||/teacher_unlock_student|function|schema cache/i.test(r.error.message||'');
+    toast(missing?'잠금만 풀기는 서버 준비가 필요합니다. Supabase SQL Editor에서 supabase/migrations/2026-11-ux-state.sql을 실행해 주세요. 지금은 비밀번호 초기화로도 잠금이 풀립니다':'잠금을 풀지 못했습니다: '+r.error.message);return}
+  if(!r.data?.ok){toast('잠금을 풀지 못했습니다: 명단에서 학생을 찾지 못했습니다');return}
+  await load();render();toast((s?who(s):'학생')+'의 잠금을 풀었습니다. 비밀번호는 그대로입니다');
+}
 const who=s=>`${s.name}(${s.sid})`;
 
-/* ---------- 확인 상자 (Esc·취소 = 아니오) ---------- */
-function ask({title,msg,ok='확인',danger=false}){
+/* ---------- 확인 상자 (Esc·취소 = 아니오) ----------
+   돌려주는 값: true(ok 버튼) / false(취소·Esc). alt를 주면 버튼이 하나 더 생기고, 그것을 누르면 'alt'. */
+function ask({title,msg,ok='확인',danger=false,alt=''}){
   let d=document.getElementById('gbDlg');
   if(!d){d=document.createElement('dialog');d.id='gbDlg';d.className='dlg';document.body.appendChild(d)}
-  d.innerHTML=`<form method="dialog"><h2 id="gbDlgT"></h2><p id="gbDlgM"></p><div class="row" style="justify-content:flex-end"><button class="btn" value="no" autofocus>취소</button><button class="btn ${danger?'red':'primary'}" value="yes" id="gbDlgOk"></button></div></form>`;
+  d.innerHTML=`<form method="dialog"><h2 id="gbDlgT"></h2><p id="gbDlgM"></p><div class="row" style="justify-content:flex-end"><button class="btn" value="no" autofocus>취소</button>${alt?'<button class="btn" value="alt" id="gbDlgAlt"></button>':''}<button class="btn ${danger?'red':'primary'}" value="yes" id="gbDlgOk"></button></div></form>`;
   d.setAttribute('aria-labelledby','gbDlgT');d.setAttribute('aria-describedby','gbDlgM');
-  d.querySelector('#gbDlgT').textContent=title;d.querySelector('#gbDlgM').textContent=msg;d.querySelector('#gbDlgOk').textContent=ok;
-  return new Promise(res=>{d.onclose=()=>res(d.returnValue==='yes');d.returnValue='';d.showModal()});
+  d.querySelector('#gbDlgT').textContent=title;d.querySelector('#gbDlgM').textContent=msg;d.querySelector('#gbDlgOk').textContent=ok;if(alt)d.querySelector('#gbDlgAlt').textContent=alt;
+  return new Promise(res=>{d.onclose=()=>res(d.returnValue==='yes'?true:alt&&d.returnValue==='alt'?'alt':false);d.returnValue='';d.showModal()});
 }
 
 /* ---------- 화면 ---------- */
@@ -60,7 +71,7 @@ function viewOneClass(c,list){
   if(!list.length)return h+(hid?`<div class="card empty"><h3>${esc(c)}에 학생이 없습니다</h3></div>`:`<div class="card empty"><h3>${esc(c)}에 아직 학생이 없습니다</h3><p><b>명단 붙여넣기</b>로 수강생 표를 통째로 붙여넣거나, <b>학생 한 명 추가</b>를 누르세요.</p></div>`);
   const shown=list.filter(s=>M.f==='all'||(M.f==='must'&&s.must)||(M.f==='own'&&!s.must)||(M.f==='locked'&&s.locked));
   const others=liveClasses().filter(x=>x!==c);
-  return h+studentTable(shown,list.length,s=>`${hid?'':`<button class="btn small" data-act="mg-reset" data-v="${esc(s.uid)}">비밀번호 초기화</button>`}${others.length?`<select class="mg-move" data-uid="${esc(s.uid)}" aria-label="${esc(who(s))} 다른 반으로 옮기기"><option value="">다른 반으로…</option>${others.map(o=>`<option>${esc(o)}</option>`).join('')}</select>`:''}${hid?'':`<button class="btn small ghost danger" data-act="mg-out" data-v="${esc(s.uid)}">반에서 빼기</button>`}`);
+  return h+studentTable(shown,list.length,s=>`${s.locked&&!hid?`<button class="btn small primary" data-act="mg-unlock" data-v="${esc(s.uid)}">잠금만 풀기</button>`:''}${hid?'':`<button class="btn small" data-act="mg-reset" data-v="${esc(s.uid)}">비밀번호 초기화</button>`}${others.length?`<select class="mg-move" data-uid="${esc(s.uid)}" aria-label="${esc(who(s))} 다른 반으로 옮기기"><option value="">다른 반으로…</option>${others.map(o=>`<option>${esc(o)}</option>`).join('')}</select>`:''}${hid?'':`<button class="btn small ghost danger" data-act="mg-out" data-v="${esc(s.uid)}">반에서 빼기</button>`}`);
 }
 
 function viewNone(list){
@@ -133,6 +144,7 @@ document.addEventListener('click',async e=>{
     case 'mg-panel':M.panel=M.panel===v?null:(v||null);render();{const f={new:'#mgNewName',rename:'#mgRename',paste:'#rosterText',add:'#mgAddSid'}[M.panel];if(f)$(f)?.focus()}break;
     case 'mg-plan':M.text=$('#rosterText').value;M.plan=rosterPlan(M.text,M.cls,mgStudents());M.drop=false;render();break;
     case 'mg-save':await savePlan();break;
+    case 'mg-unlock':{const s=stu(v);if(!s)break;if(await ask({title:'잠금만 풀기',msg:`${who(s)} 학생의 잠금을 풉니다. 비밀번호는 바뀌지 않으니 학생은 원래 비밀번호로 바로 로그인할 수 있습니다. (다른 학생이 일부러 틀려서 잠근 경우에 쓰세요)`,ok:'잠금 풀기'}))await unlockStu(v);break}
     case 'mg-reset':{const s=stu(v);if(!s)break;if(await ask({title:'비밀번호 초기화',msg:`${who(s)} 학생의 비밀번호를 학번으로 되돌립니다. 잠금도 풀리고, 지금 로그인해 있으면 로그아웃됩니다.`,ok:'초기화',danger:true}))await resetPw(v);break}
     case 'mg-out':{const s=stu(v);if(!s)break;if(await ask({title:'반에서 빼기',msg:`${who(s)} 학생을 ${s.cls}에서 뺍니다. 답안 기록은 남지만, 다시 반에 넣기 전에는 시험을 볼 수 없습니다.`,ok:'반에서 빼기',danger:true}))await api(async()=>chk(await sb.from('students').update({class_id:null}).eq('id',v)),`${s.name} 학생을 반에서 뺐습니다`);break}
     case 'mg-hide':{const c=M.cls;const n=mgStudents().filter(s=>s.cls===c).length;
