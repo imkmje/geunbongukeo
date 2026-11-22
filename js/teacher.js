@@ -116,7 +116,7 @@ const TABS=[['class','반 분석'],['live','실시간 현황'],['student','학�
 function renderTabs(){
   const nav=$('#tabs');
   if(!(S.session&&S.teacher)&&!S.demo){nav.innerHTML='';return}
-  nav.innerHTML=TABS.map(([k,l])=>`<button class="tab" role="tab" aria-selected="${S.tab===k}" data-act="tab" data-v="${k}">${l}</button>`).join('')+(S.session?`<button class="tab" data-act="reload">새로고침</button><button class="tab" data-act="logout">로그아웃</button>`:'');
+  nav.innerHTML=TABS.map(([k,l])=>`<button class="tab" role="tab" aria-selected="${S.tab===k}" data-act="tab" data-v="${k}">${l}</button>`).join('')+(S.session?`<button class="tab" data-act="qr">학생 접속 QR</button><button class="tab" data-act="reload">새로고침</button><button class="tab" data-act="logout">로그아웃</button>`:'');
 }
 
 /* ---------- 메인 렌더 ---------- */
@@ -436,6 +436,7 @@ document.addEventListener('click',async e=>{
     case 'hid-toggle':S.showHidden=!S.showHidden;lsSet('gb-show-hidden',S.showHidden);render();break;
     case 'cf':S.cf=v;lsSet('omr-cf',v);S.selStudent=null;S.bulk=null;if(S.stuF)S.stuF.cls='';render();break;
     case 'site-save':{const v2={title:normName($('#siteTitle').value),student_subtitle:normName($('#siteStu').value),teacher_subtitle:normName($('#siteTch').value)};if(!v2.title){toast('제목을 적어 주세요');break}await api(async()=>chk(await sb.from('site_settings').update({...v2,updated_at:nowIso()}).eq('id',1).select()).length||(()=>{throw new Error('설정 표가 없습니다. Supabase에서 최신 schema.sql을 다시 실행해 주세요')})(),'제목을 저장했습니다');break}
+    case 'qr':openQr();break;
     case 'reload':S.ready=false;render();try{await load()}catch(e){toast('불러오지 못했습니다: '+(e?.message||e))}S.ready=true;render();break;
     case 'logout':await sb.auth.signOut();S.session=null;S.teacher=false;S.live={tests:{},keys:{},stats:{},subs:{},manual:{},config:{},roster:{}};render();break;
     case 'edit-save':await saveEdit();break;
