@@ -70,6 +70,7 @@ async function load(){
   for(const k of tk)L.keys[k.test_id]={a:k.answers||'',nat:k.nat,ex:k.ex,tags:k.tags};
   for(const x of sub){const s0=idx.studentById[x.student_id];if(!s0)continue;const m=L.manual[s0.id]=L.manual[s0.id]||{name:s0.sid+' '+s0.name,answers:{}};m.answers[x.test_id]={a:x.answers,at:Date.parse(x.submitted_at)||0,cls:cById[s0.class_id]||'',src:x.src}}
   S.live=L;S.idx=idx;
+  await frLoad();// js/feedback.js: 한마디·다시 풀기·정답 공개 단계
   S.site=await loadSite(sb,'teacher');
 }
 async function api(fn,okMsg){
@@ -136,7 +137,7 @@ function viewClass(){
       if(x.disc!=null&&x.disc<0)why.push(['warn','변별도 음수 · 정답 확인']);
       return {...x,why,nr}}).filter(x=>x.why.length).sort((a,b)=>b.why.length-a.why.length||a.rate-b.rate).slice(0,8);
   h+=`<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><h2>${esc(t.title)}</h2><p class="sub">${esc(t.date||'')} · 문항 ${t.items.length}개${hasElectives(t)?' · 선택과목 분리':''}</p></div>
-    <div class="row">${(()=>{const tg=S.cf?[S.cf]:(liveClasses().length?liveClasses():['']);const lab=S.cf?S.cf+'에':(classes().length?'모든 반에':'학생에게');return tg.every(c=>isRel(t,c))?`<span class="pill rel">${S.cf?esc(S.cf)+' ':''}결과 공개됨</span><button class="btn small" data-act="unrelease" data-v="${t.id}">공개 취소</button>`:`<button class="btn red" data-act="release" data-v="${t.id}" ${keyMissing?'disabled title="정답을 모두 입력해야 공개할 수 있습니다"':''}>${esc(lab)} 결과 공개</button>`})()}</div></div>
+    </div>${frStagePanel(t,keyMissing)}
     ${classes().length&&(t.releasedFor||[]).length&&effClasses().some(c=>!isRel(t,c))?`<p class="note" style="margin-top:12px"><b>일부 반에만 공개되어 있습니다.</b> 화면에는 보이지 않지만, 아직 공개하지 않은 반 학생도 기술적으로는 정답을 찾아볼 수 있습니다. 같은 시험지를 쓰는 반이 모두 푼 뒤에 공개하는 편이 안전합니다.</p>`:''}
     ${keyMissing?`<p class="note" style="margin-top:12px"><b>정답이 비어 있는 문항이 있습니다.</b> 시험 관리에서 정답을 모두 입력해야 정답률이 맞게 계산됩니다.</p>`:''}
     ${(t.releasedFor||[]).length&&recs.some(r=>r.at>(D().stats[t.id]?.at||0))?`<p class="note" style="margin-top:12px"><b>공개한 뒤에 새 답안이 들어왔습니다.</b> 학생 화면의 반 정답률을 갱신하려면 <button class="btn small" data-act="release" data-v="${t.id}">공개 자료 갱신</button></p>`:''}
@@ -155,6 +156,7 @@ function viewClass(){
   if(setNames.length){const srows=setNames.map(nm=>{const idx=t.items.map((x,i)=>x.set===nm?i:-1).filter(i=>i>=0);let col=0,sumc=0,cnt=0;for(const g of an.graded){const my=idx.filter(i=>g.res[i]!==undefined);if(!my.length)continue;cnt++;const w=my.filter(i=>!g.res[i]).length;sumc+=(my.length-w)/my.length;if(w>=2&&w/my.length>=.5)col++}return {nm,nos:idx.map(i=>t.items[i].no),rate:cnt?sumc/cnt:null,col:cnt?col/cnt:null}});
     h+=`<div class="card"><h3>지문 세트별</h3><p class="sub" style="margin-bottom:8px">'지문 전체를 놓친 학생'은 그 세트 문항의 절반 이상(2개 이상)을 틀린 학생입니다. 이 비율이 높으면 선지 해설보다 지문 구조 설명이 먼저입니다.</p><div class="tbl-wrap"><table><thead><tr><th>지문 세트</th><th>문항</th><th class="n">평균 정답률</th><th class="n">지문 전체를 놓친 학생</th></tr></thead><tbody>${srows.map(x=>`<tr><td>${esc(x.nm)}</td><td class="mono">${esc(x.nos.join(', '))}</td><td class="n">${pct(x.rate)}</td><td class="n ${x.col>=.3?'rate lo':''}">${pct(x.col)}</td></tr>`).join('')}</tbody></table></div></div>`}
   const ktags=D().keys[t.id]?.tags;if(ktags){const cp=[];for(const g of recs)cp.push(...tagPicks(t,key,ktags,g,t.id));if(cp.length){const c=tagCount(cp);h+=`<div class="card"><h3>반이 고른 오답의 유형</h3><p class="sub" style="margin-bottom:8px">이번 회차에서 학생들이 고른 오답 ${cp.length}개를 꼬리표별로 모았습니다.</p>${barRows(Object.entries(c).sort((a,b)=>b[1]-a[1]).map(([k,v])=>({label:k,v:v/cp.length})))}</div>`}}
+  h+=frClassCards(t,recs,key);// js/feedback.js: 설명할 문항, 학생별 한마디·다시 풀기
   const rows=[...it];
   const sorters={no:(a,b)=>a.i-b.i,rate:(a,b)=>a.rate-b.rate,gap:(a,b)=>((a.rate-(nat?.[a.i]?.r??a.rate))-(b.rate-(nat?.[b.i]?.r??b.rate))),disc:(a,b)=>(a.disc??9)-(b.disc??9)};
   rows.sort(sorters[S.sortBy]||sorters.no);
@@ -185,6 +187,7 @@ function viewStudentReport(){
   r.tagCum=myPicks;fb=feedbackText(rec.name,t,r,cls);
   h+=`<div class="card"><div class="row" style="justify-content:space-between"><label class="f">학생 선택<select id="stuSel" data-act="sel-student">${recs.map(x=>`<option ${x.name===rec.name?'selected':''}>${esc(x.name)}</option>`).join('')}</select></label>
     <div class="tiles" style="flex:1;max-width:560px"><div class="tile"><div class="k">점수</div><div class="v">${r.score}<small> / ${r.max}</small></div></div><div class="tile"><div class="k">반 평균 대비</div><div class="v">${pp(r.pct-an.avgPct)}<small> %p</small></div></div><div class="tile"><div class="k">틀린 문항</div><div class="v">${r.wrong.length}<small> 개</small></div></div></div></div></div>
+  ${frStudentCards(t,rec,recs,key)}
   <div class="grid2"><div class="card"><h3>많이 맞혔는데 놓친 문항</h3><p class="sub" style="margin-bottom:8px">${nat?'전국':'반'} 정답률 70% 이상인데 틀린 문항입니다. 실수나 근거 확인 부족일 가능성이 큽니다.</p>
     ${r.missedEasy.length?`<div class="focus-list">${r.missedEasy.map(x=>`<div class="focus-item"><div class="qno">${esc(x.no)}</div><div>${esc(x.area)}${x.type?' · '+esc(x.type):''}<div class="why"><span class="pill" style="color:var(--bad)">고른 답 ${(x.mine==='0'?'무응답':CIR[+x.mine])}</span><span class="pill" style="color:var(--s1)">정답 ${CIR[+x.ans]}</span></div></div><div class="num" style="text-align:right">반 ${pct(x.rate)}${x.nr!=null?`<br><span class="muted">전국 ${pct(x.nr)}</span>`:''}</div></div>`).join('')}</div>`:'<p class="muted">해당 문항이 없습니다.</p>'}
   </div><div class="card"><h3>영역별 · 반과 비교</h3>${barRows(r.areaCmp.map(x=>({label:x.name,v:x.me,w:x.cls})),{a:rec.name,b:'반 평균'})}

@@ -384,3 +384,278 @@ grant execute on function public.teacher_set_class_hidden(uuid, boolean) to auth
 -- ───────────────────────── 교사 등록 (따로 한 번 실행) ─────────────────────────
 -- Authentication → Users에서 교사 계정을 만든 뒤, 아래 줄의 이메일을 바꿔 실행한다.
 -- insert into public.teachers(user_id) select id from auth.users where email = '선생님@이메일' on conflict do nothing;
+
+-- ═══ 추가 기능: 학생별 피드백 · 틀린 문항 다시 풀기 ═══
+-- 수업 흐름(반마다): 응시 → ① 결과 공개 → ② 학생이 틀린 문항 다시 풀기(한 번) → 교사 설명 수업 → ③ 정답·해설 공개
+--  * 결과 공개(test_class.released): 학생은 점수, 문항별 맞음/틀림/무응답, 영역·지문 세트별 결과, 반 통계만 본다.
+--    정답·해설·선지 비율(전국·반)·오답 꼬리표·선생님 한마디는 보내지 않는다(서버에서 막음).
+--  * 다시 풀기(retries): 결과 공개 뒤 정답·해설 공개 전까지만, 학생마다 시험당 한 번. 틀렸거나 비운 문항만 다시 마킹한다.
+--    다시 푼 답이 맞았는지는 정답·해설 공개 뒤에만 알려 준다(정답을 떠보는 데 쓰지 못하게).
+--  * 정답·해설 공개(test_class.key_released): 정답·해설·다시 풀기 결과(실수형/개념형)·선생님 한마디가 열린다.
+--  * 결과가 공개된 뒤에는 학생이 처음 답안을 고칠 수 없다(맞음/틀림을 보고 답을 바꿔 정답을 알아내지 못하게).
+-- 이 블록은 위쪽의 student_home·student_submit·student_results를 새 규칙으로 다시 만든다(이 블록이 최종본).
+
+-- ───── 정답·해설 공개 단계 ─────
+alter table public.test_class add column if not exists key_released boolean not null default false;
+alter table public.test_class add column if not exists key_released_at timestamptz;
+
+-- 이 기능 전에 이미 결과를 공개한 시험은 학생이 정답·해설을 보고 있었으므로, 처음 한 번만 '정답·해설 공개'로 옮긴다.
+-- (그 시험은 다시 풀기 단계를 건너뛴 것으로 본다. 두 번째 실행부터는 건너뛴다.)
+do $$
+begin
+  if not exists (select 1 from public.schema_migrations where name = 'key_release_v1') then
+    update public.test_class set key_released = true, key_released_at = coalesce(released_at, now()) where released;
+    insert into public.schema_migrations(name) values ('key_release_v1');
+  end if;
+end $$;
+
+-- 결과 공개를 취소하면 정답·해설 공개도 함께 취소된다(다시 공개할 때 정답이 바로 보이지 않게).
+create or replace function public._test_class_key_guard()
+returns trigger language plpgsql
+set search_path = public
+as $$
+begin
+  if not new.released then new.key_released := false; new.key_released_at := null; end if;
+  if new.key_released and new.key_released_at is null then new.key_released_at := now(); end if;
+  if not new.key_released then new.key_released_at := null; end if;
+  return new;
+end $$;
+drop trigger if exists test_class_key_guard on public.test_class;
+create trigger test_class_key_guard before insert or update on public.test_class
+  for each row execute function public._test_class_key_guard();
+
+-- ───── 표 ─────
+-- 선생님 한마디: 시험별(test_id 있음) 또는 누적 코멘트(test_id 없음). 학생·시험마다 하나.
+create table if not exists public.feedback (
+  id         uuid primary key default gen_random_uuid(),
+  test_id    uuid references public.tests(id) on delete cascade,
+  student_id uuid not null references public.students(id) on delete cascade,
+  body       text not null check (length(body) between 1 and 500),
+  updated_at timestamptz not null default now(),
+  constraint feedback_test_student_key unique nulls not distinct (test_id, student_id)
+);
+create index if not exists feedback_student_idx on public.feedback(student_id);
+
+-- 다시 풀기: 처음 답안과 같은 길이. 다시 푼 문항만 '0'~'5'(0=또 비움), 나머지는 '-'.
+create table if not exists public.retries (
+  test_id      uuid not null references public.tests(id) on delete cascade,
+  student_id   uuid not null references public.students(id) on delete cascade,
+  answers      text not null check (answers ~ '^[0-5-]*$'),
+  submitted_at timestamptz not null default now(),
+  primary key (test_id, student_id)
+);
+create index if not exists retries_student_idx on public.retries(student_id);
+
+do $$
+declare t text;
+begin
+  foreach t in array array['feedback','retries'] loop
+    execute format('alter table public.%I enable row level security', t);
+    execute format('drop policy if exists teacher_all on public.%I', t);
+    execute format('create policy teacher_all on public.%I for all to authenticated using (public.is_teacher()) with check (public.is_teacher())', t);
+  end loop;
+end $$;
+
+-- ───── 채점 도우미(안에서만 씀) ─────
+-- 문항마다 'O' 맞음 / 'X' 틀림 / 'B' 무응답 / '.' 채점 안 함(정답 없음·선택과목). 답안이 없으면 null.
+create or replace function public._ox(p_items jsonb, p_key text, p_ans text)
+returns text language sql immutable
+set search_path = public
+as $$
+  select case when p_ans is null then null else coalesce(string_agg(
+           case when substr(coalesce(p_key,''), i, 1) not between '1' and '5'
+                  or coalesce(p_items->(i-1)->>'el', '') <> '' then '.'
+                when substr(p_ans, i, 1) = substr(p_key, i, 1) then 'O'
+                when substr(p_ans, i, 1) in ('', '0') then 'B'
+                else 'X' end, '' order by i), '') end
+    from generate_series(1, coalesce(jsonb_array_length(p_items), 0)) i
+$$;
+
+-- ───── 학생용 함수 (새 규칙으로 다시 만듦) ─────
+-- 시험 목록: 결과가 공개된 시험은 응시 중으로 보이지 않는다.
+create or replace function public.student_home(p_token uuid)
+returns json language plpgsql stable security definer
+set search_path = public
+as $$
+declare s public.students; cls text;
+begin
+  s := public._session_student_ready(p_token);
+  select name into cls from public.classes where id = s.class_id;
+  return json_build_object(
+    'sid', s.sid, 'name', s.name, 'class', cls,
+    'tests', coalesce((
+      select json_agg(json_build_object(
+               'id', t.id, 'title', t.title, 'test_date', t.test_date, 'items', t.items,
+               'is_open', tc.is_open and not tc.released, 'released', tc.released,
+               'key_released', tc.released and tc.key_released,
+               'retry_due', tc.released and not tc.key_released and sub.answers is not null and rt.test_id is null
+                            and public._ox(t.items, k.answers, sub.answers) ~ '[XB]',
+               'submitted_at', sub.submitted_at, 'answers', sub.answers)
+             order by t.test_date desc nulls last, t.created_at desc)
+        from public.test_class tc
+        join public.tests t on t.id = tc.test_id
+        left join public.test_keys k on k.test_id = t.id
+        left join public.submissions sub on sub.test_id = t.id and sub.student_id = s.id
+        left join public.retries rt on rt.test_id = t.id and rt.student_id = s.id
+       where tc.class_id = s.class_id and (tc.is_open or tc.released)), '[]'::json));
+end $$;
+
+-- 답안 제출: 내 반에 응시가 열려 있고, 아직 결과가 공개되지 않았을 때만
+create or replace function public.student_submit(p_token uuid, p_test uuid, p_answers text)
+returns json language plpgsql volatile security definer
+set search_path = public
+as $$
+declare s public.students; n int;
+begin
+  s := public._session_student_ready(p_token);
+  if not exists (select 1 from public.test_class where test_id = p_test and class_id = s.class_id and is_open and not released) then
+    return json_build_object('ok', false, 'error', 'closed');
+  end if;
+  select jsonb_array_length(items) into n from public.tests where id = p_test;
+  if p_answers !~ '^[0-5]*$' or length(p_answers) <> n then
+    return json_build_object('ok', false, 'error', 'bad_answers');
+  end if;
+  insert into public.submissions(test_id, student_id, answers, src, submitted_at)
+  values (p_test, s.id, p_answers, 'student', now())
+  on conflict (test_id, student_id) do update
+    set answers = excluded.answers, src = 'student', submitted_at = now();
+  return json_build_object('ok', true, 'submitted_at', now());
+end $$;
+
+-- 결과: 내 반에 공개된 시험만. p_test가 null이면 공개된 전부(누적 기록용).
+--  stage 'result'(정답·해설 공개 전): 점수 계산용 ox, 반 통계(문항 정답률·영역·유형), 전국 정답률(r)만.
+--     key·ex·tags·선지 비율(nat.d, stats.dist)·선생님 한마디는 null.
+--  stage 'key'(정답·해설 공개 후): 위에 더해 key·ex·tags·nat·stats 전체, 다시 풀기 답, 선생님 한마디.
+create or replace function public.student_results(p_token uuid, p_test uuid default null)
+returns json language plpgsql stable security definer
+set search_path = public
+as $$
+declare s public.students; r record; res jsonb := '[]'::jsonb; ox text; st jsonb;
+begin
+  s := public._session_student_ready(p_token);
+  for r in
+    select t.id, t.title, t.test_date, t.items, k.answers as key, k.nat, k.ex, k.tags, tc.stats,
+           tc.key_released as kr, sub.answers, sub.submitted_at,
+           rt.answers as r_answers, rt.submitted_at as r_at, fb.body as fb_body, fb.updated_at as fb_at
+      from public.test_class tc
+      join public.tests t on t.id = tc.test_id
+      left join public.test_keys k on k.test_id = t.id
+      left join public.submissions sub on sub.test_id = t.id and sub.student_id = s.id
+      left join public.retries rt on rt.test_id = t.id and rt.student_id = s.id
+      left join public.feedback fb on fb.test_id = t.id and fb.student_id = s.id
+     where tc.class_id = s.class_id and tc.released
+       and (p_test is null or t.id = p_test)
+     order by t.test_date nulls last, t.created_at
+  loop
+    ox := public._ox(r.items, r.key, r.answers);
+    if r.kr then
+      res := res || jsonb_build_array(jsonb_build_object(
+        'id', r.id, 'title', r.title, 'test_date', r.test_date, 'items', r.items, 'stage', 'key',
+        'key', r.key, 'nat', r.nat, 'ex', r.ex, 'tags', r.tags, 'stats', r.stats,
+        'answers', r.answers, 'submitted_at', r.submitted_at, 'ox', ox,
+        'retry', case when r.r_answers is null then null else jsonb_build_object('answers', r.r_answers, 'submitted_at', r.r_at) end,
+        'can_retry', false,
+        'feedback', case when r.fb_body is null then null else jsonb_build_object('body', r.fb_body, 'updated_at', r.fb_at) end));
+    else
+      st := r.stats;
+      if st is not null then st := st - 'dist'; end if;
+      res := res || jsonb_build_array(jsonb_build_object(
+        'id', r.id, 'title', r.title, 'test_date', r.test_date, 'items', r.items, 'stage', 'result',
+        'key', null, 'ex', null, 'tags', null, 'stats', st,
+        'nat', case when jsonb_typeof(r.nat) = 'array' then
+                 (select jsonb_agg(case when jsonb_typeof(e) = 'object' then jsonb_build_object('r', e->'r') else null end order by o)
+                    from jsonb_array_elements(r.nat) with ordinality x(e, o)) end,
+        'answers', r.answers, 'submitted_at', r.submitted_at, 'ox', ox,
+        'retry', case when r.r_answers is null then null else jsonb_build_object('answers', r.r_answers, 'submitted_at', r.r_at) end,
+        'can_retry', r.answers is not null and r.r_answers is null and coalesce(ox, '') ~ '[XB]',
+        'feedback', null));
+    end if;
+  end loop;
+  return res::json;
+end $$;
+
+-- 다시 풀기 제출: 결과 공개 뒤·정답 공개 전, 답안을 낸 학생만, 시험당 한 번.
+-- p_answers: 처음 답안과 같은 길이('0'~'5' 또는 '-'). 틀렸거나 비운 문항 자리만 읽고 나머지는 '-'로 저장한다.
+create or replace function public.student_retry_submit(p_token uuid, p_test uuid, p_answers text)
+returns json language plpgsql volatile security definer
+set search_path = public
+as $$
+declare s public.students; tc public.test_class; it jsonb; ky text; first text; ox text; n int; out text := ''; c text; i int;
+begin
+  s := public._session_student_ready(p_token);
+  select * into tc from public.test_class where test_id = p_test and class_id = s.class_id;
+  if not found or not tc.released then return json_build_object('ok', false, 'error', 'not_released'); end if;
+  if tc.key_released then return json_build_object('ok', false, 'error', 'key_released'); end if;
+  select answers into first from public.submissions where test_id = p_test and student_id = s.id;
+  if not found then return json_build_object('ok', false, 'error', 'no_submission'); end if;
+  if exists (select 1 from public.retries where test_id = p_test and student_id = s.id) then
+    return json_build_object('ok', false, 'error', 'already');
+  end if;
+  select t.items, k.answers into it, ky from public.tests t left join public.test_keys k on k.test_id = t.id where t.id = p_test;
+  ox := public._ox(it, ky, first);
+  if ox !~ '[XB]' then return json_build_object('ok', false, 'error', 'nothing_to_retry'); end if;
+  n := jsonb_array_length(it);
+  if p_answers is null or length(p_answers) <> n or p_answers !~ '^[0-5-]*$' then
+    return json_build_object('ok', false, 'error', 'bad_answers');
+  end if;
+  for i in 1..n loop
+    if substr(ox, i, 1) in ('X', 'B') then
+      c := substr(p_answers, i, 1); out := out || case when c = '-' then '0' else c end;
+    else out := out || '-'; end if;
+  end loop;
+  insert into public.retries(test_id, student_id, answers) values (p_test, s.id, out)
+  on conflict (test_id, student_id) do nothing;
+  if not found then return json_build_object('ok', false, 'error', 'already'); end if;
+  return json_build_object('ok', true, 'submitted_at', now());
+end $$;
+
+-- 누적 코멘트(시험과 상관없는 선생님 한마디). 교사가 적으면 바로 보인다.
+create or replace function public.student_overall_feedback(p_token uuid)
+returns json language plpgsql stable security definer
+set search_path = public
+as $$
+declare s public.students; f public.feedback;
+begin
+  s := public._session_student_ready(p_token);
+  select * into f from public.feedback where student_id = s.id and test_id is null;
+  if not found then return null; end if;
+  return json_build_object('body', f.body, 'updated_at', f.updated_at);
+end $$;
+
+-- ───── 교사용 함수 ─────
+-- 선생님 한마디 저장. p_test null = 누적 코멘트. 빈 글이면 지운다. 500자까지.
+create or replace function public.teacher_save_feedback(p_student uuid, p_test uuid, p_body text)
+returns json language plpgsql volatile security definer
+set search_path = public
+as $$
+declare b text := btrim(replace(coalesce(p_body, ''), E'\r\n', E'\n'), E' \t\n'); at timestamptz;
+begin
+  if not public.is_teacher() then raise exception 'not_teacher' using errcode = '42501'; end if;
+  if not exists (select 1 from public.students where id = p_student)
+     or (p_test is not null and not exists (select 1 from public.tests where id = p_test)) then
+    return json_build_object('ok', false, 'error', 'not_found');
+  end if;
+  if b = '' then
+    delete from public.feedback where student_id = p_student and test_id is not distinct from p_test;
+    return json_build_object('ok', true, 'deleted', true);
+  end if;
+  if length(b) > 500 then return json_build_object('ok', false, 'error', 'too_long'); end if;
+  insert into public.feedback(test_id, student_id, body, updated_at) values (p_test, p_student, b, now())
+  on conflict (test_id, student_id) do update set body = excluded.body, updated_at = now()
+  returning updated_at into at;
+  return json_build_object('ok', true, 'body', b, 'updated_at', at);
+end $$;
+
+-- 새 함수 실행 권한(위의 전체 revoke 뒤에 만든 함수는 기본으로 모두에게 열려 있으므로 먼저 거둔다)
+revoke execute on function public._ox(jsonb, text, text) from public, anon, authenticated;
+revoke execute on function public._test_class_key_guard() from public, anon, authenticated;
+revoke execute on function public.student_retry_submit(uuid, uuid, text) from public, anon, authenticated;
+revoke execute on function public.student_overall_feedback(uuid) from public, anon, authenticated;
+revoke execute on function public.teacher_save_feedback(uuid, uuid, text) from public, anon, authenticated;
+grant execute on function public.student_home(uuid) to anon, authenticated;
+grant execute on function public.student_submit(uuid, uuid, text) to anon, authenticated;
+grant execute on function public.student_results(uuid, uuid) to anon, authenticated;
+grant execute on function public.student_retry_submit(uuid, uuid, text) to anon, authenticated;
+grant execute on function public.student_overall_feedback(uuid) to anon, authenticated;
+grant execute on function public.teacher_save_feedback(uuid, uuid, text) to authenticated;
+-- _ox, _test_class_key_guard는 아무에게도 주지 않는다(안에서만 쓰임).
