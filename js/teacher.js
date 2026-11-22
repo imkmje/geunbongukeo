@@ -64,6 +64,7 @@ async function load(){
   for(const k of tk)L.keys[k.test_id]={a:k.answers||'',nat:k.nat,ex:k.ex,tags:k.tags};
   for(const x of sub){const s0=idx.studentById[x.student_id];if(!s0)continue;const m=L.manual[s0.id]=L.manual[s0.id]||{name:s0.sid+' '+s0.name,answers:{}};m.answers[x.test_id]={a:x.answers,at:Date.parse(x.submitted_at)||0,cls:cById[s0.class_id]||'',src:x.src}}
   S.live=L;S.idx=idx;
+  S.site=await loadSite(sb,'teacher');
 }
 async function api(fn,okMsg){
   if(S.demo){toast('예시 데이터에서는 저장되지 않습니다');return false}
@@ -232,6 +233,7 @@ function viewManage(){
   if(!ts.length)h+=`<p class="note" style="margin-top:14px">아직 시험이 없습니다. <b>새 시험 만들기</b>를 누르면 45문항 틀이 미리 채워집니다. 영역 구분은 실제 시험지를 보고 맞춰 주세요.</p>`;
   else h+=`<div class="tbl-wrap" style="margin-top:14px"><table><thead><tr><th>시험</th><th>상태</th><th class="n">답안</th><th>정답</th><th>전국 자료</th><th></th></tr></thead><tbody>${ts.map(t=>{const [c,l]=statusOf(t);const k=keyOf(t.id);const filled=t.items.filter((_,i)=>k[i]&&k[i]!=='0').length;const nat=natOf(t.id);const cf=S.confirm==='del:'+t.id;return `<tr><td><b>${esc(t.title)}</b><br><span class="muted">${esc(t.date||'')}</span></td><td>${classes().length?classes().map(cc=>{const [c2,l2]=statusOf(t,cc);return `<div><span class="pill ${c2}">${esc(cc)} ${l2}</span></div>`}).join(''):`<span class="pill ${c}">${l}</span>`}</td><td class="n">${recordsFor(t.id,'').length}</td><td class="num">${filled}/${t.items.length}</td><td>${nat&&nat.some(Boolean)?'있음':'<span class="muted">없음</span>'}</td><td><div class="row" style="gap:6px">${effClasses().map(c=>isOpen(t,c)?`<button class="btn small" data-act="close" data-v="${t.id}|${esc(c)}">${c?esc(c)+' ':''}응시 닫기</button>`:`<button class="btn small" data-act="open" data-v="${t.id}|${esc(c)}">${c?esc(c)+' ':''}응시 열기</button>`).join('')}<button class="btn small" data-act="edit" data-v="${t.id}">편집</button>${cf?`<span class="confirm">답안 기록은 남고 시험만 지워집니다 <button class="btn small red" data-act="del-yes" data-v="${t.id}">삭제</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:`<button class="btn small ghost" data-act="del" data-v="${t.id}">삭제</button>`}</div></td></tr>`}).join('')}</tbody></table></div>`;
   h+='</div>';
+  {const x={...SITE_DEFAULT,...(S.site||{})};h+=`<div class="card"><h3>사이트 제목</h3><p class="sub" style="margin-bottom:10px">학생 화면과 교사 화면 맨 위에 보이는 제목과 그 위의 작은 설명 줄입니다.</p><div class="row" style="align-items:flex-end"><label class="f" style="flex:1;min-width:160px">제목<input type="text" id="siteTitle" maxlength="40" value="${esc(x.title)}"></label><label class="f" style="flex:2;min-width:200px">학생 화면 설명 줄<input type="text" id="siteStu" maxlength="60" value="${esc(x.student_subtitle)}"></label><label class="f" style="flex:2;min-width:200px">교사 화면 설명 줄<input type="text" id="siteTch" maxlength="60" value="${esc(x.teacher_subtitle)}"></label><button class="btn primary" data-act="site-save">제목 저장</button></div></div>`}
   {const cl=classes();h+=`<div class="card"><h3>반 관리</h3><p class="sub" style="margin-bottom:10px">방과후 반을 만들면 반마다 응시를 열고 결과를 따로 공개하며, 분석도 반별로 볼 수 있습니다. 학생은 학번과 개인 코드로 로그인하면 자기 반의 시험만 봅니다.</p><div class="row">${cl.map(c=>S.confirm==='cls:'+c?`<span class="confirm">${esc(c)} 삭제(답안 기록은 남음) <button class="btn small red" data-act="cls-del-yes" data-v="${esc(c)}">삭제</button><button class="btn small ghost" data-act="cancel-confirm">취소</button></span>`:`<span class="chip" style="cursor:default">${esc(c)} · ${(rosterLists()[c]||[]).length}명 ${(()=>{const l=rosterLists()[c]||[];const m=l.filter(p=>!p.has_code).length;return m?`<span class="pill closed">코드 없음 ${m}</span> `:''})()}<button class="btn small ghost" data-act="ros-edit" data-v="${esc(c)}">명단</button><button class="btn small ghost" data-act="codes" data-v="${esc(c)}">코드 발급</button><button class="btn small ghost" data-act="cls-del" data-v="${esc(c)}" aria-label="${esc(c)} 삭제">×</button></span>`).join('')}<input type="text" id="newCls" placeholder="예: 화목반" style="width:140px" aria-label="새 반 이름"><button class="btn small" data-act="cls-add">반 추가</button></div>${S.rosterEdit&&cl.includes(S.rosterEdit)?rosterEditor(S.rosterEdit):''}${S.codes&&cl.includes(S.codes.cls)?codeSheet():''}</div>`}
   if(ts.length){
     if(!S.importTest||!D().tests[S.importTest])S.importTest=ts[ts.length-1].id;
@@ -312,6 +314,7 @@ document.addEventListener('click',async e=>{
     case 'cls-del':S.confirm='cls:'+v;render();break;
     case 'cls-del-yes':S.confirm=null;await api(async()=>chk(await sb.from('classes').delete().eq('id',clsId(v))),'반을 지웠습니다(학생과 답안 기록은 남습니다)');break;
     case 'codes':await issueCodes(v,{only:true});break;
+    case 'site-save':{const v2={title:normName($('#siteTitle').value),student_subtitle:normName($('#siteStu').value),teacher_subtitle:normName($('#siteTch').value)};if(!v2.title){toast('제목을 적어 주세요');break}await api(async()=>chk(await sb.from('site_settings').update({...v2,updated_at:nowIso()}).eq('id',1).select()).length||(()=>{throw new Error('설정 표가 없습니다. Supabase에서 최신 schema.sql을 다시 실행해 주세요')})(),'제목을 저장했습니다');break}
     case 'reissue':S.confirm='reissue:'+v;render();break;
     case 'codes-all':S.confirm=null;await issueCodes(v,{only:false});break;
     case 'codes-one':{const sid=($('#oneSid')?.value||'').trim();const st=S.idx.studentBySid[sid];if(!st){toast('명단에 없는 학번입니다');break}await issueCodes(S.codes.cls,{student:st.id});break}
@@ -456,6 +459,7 @@ async function afterLogin(session){
 }
 (async function boot(){
   S.cf=lsGet('omr-cf','')||'';
+  loadSite(sb,'teacher').then(x=>{S.site=x});
   const {data}=await sb.auth.getSession();
   if(data.session)await afterLogin(data.session);else{S.ready=true;render()}
 })();

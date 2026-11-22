@@ -37,7 +37,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 header.top{border-bottom:3px solid var(--omr);background:var(--paper)}
 header.top .wrap{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px 24px;padding-block:18px 12px}
 .brand{display:flex;flex-direction:column;gap:2px;min-width:0}
-.brand .eyebrow{font-family:var(--f-mono);font-size:11px;letter-spacing:.14em;color:var(--omr-ink);text-transform:uppercase}
+.brand .eyebrow{font-size:12.5px;font-weight:500;letter-spacing:.02em;color:var(--omr-ink)}
 .brand h1{margin:0;font-family:var(--f-disp);font-weight:800;font-size:26px;letter-spacing:-.01em;text-wrap:balance}
 .tabs{display:flex;gap:4px;flex-wrap:wrap;margin-left:auto}
 .tab{border:1px solid transparent;background:none;padding:7px 12px;border-radius:6px;cursor:pointer;color:var(--ink2);font-weight:500}

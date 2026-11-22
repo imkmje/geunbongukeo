@@ -86,6 +86,22 @@ returns boolean language sql stable security definer
 set search_path = public
 as $$ select exists (select 1 from public.teachers where user_id = auth.uid()) $$;
 
+-- ───────────────────────── 사이트 설정(제목 등) ─────────────────────────
+-- 누구나 읽을 수 있는 공개 정보. 교사만 고칠 수 있다.
+create table if not exists public.site_settings (
+  id               int primary key default 1 check (id = 1),
+  title            text not null default '근본국어' check (length(trim(title)) between 1 and 40),
+  student_subtitle text not null default '고2 국어 · 내 답안과 결과' check (length(student_subtitle) <= 60),
+  teacher_subtitle text not null default '교사 · 문항 분석' check (length(teacher_subtitle) <= 60),
+  updated_at       timestamptz not null default now()
+);
+insert into public.site_settings(id) values (1) on conflict do nothing;
+alter table public.site_settings enable row level security;
+drop policy if exists public_read on public.site_settings;
+create policy public_read on public.site_settings for select to anon, authenticated using (true);
+drop policy if exists teacher_write on public.site_settings;
+create policy teacher_write on public.site_settings for update to authenticated using (public.is_teacher()) with check (public.is_teacher());
+
 -- ───────────────────────── 접근 규칙(RLS) ─────────────────────────
 do $$
 declare t text;

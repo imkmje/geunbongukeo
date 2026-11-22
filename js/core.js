@@ -167,3 +167,14 @@ function omrCard(t,rec,key,ro){
   return `<div class="omr"><div class="omr-head"><span class="t">${esc(t.title)}</span><span class="mono" style="font-size:12px">국어 영역 답안지${ro?' · 파란 테두리가 정답':''}</span>${elec}</div><div class="omr-cols">${cols}</div></div>`;
 }
 
+
+/* ---------- 사이트 제목 (교사가 설정, 누구나 읽음) ---------- */
+const SITE_DEFAULT={title:'근본국어',student_subtitle:'고2 국어 · 내 답안과 결과',teacher_subtitle:'교사 · 문항 분석'};
+function paintSite(v,mode){const x={...SITE_DEFAULT,...(v||{})};const h=document.querySelector('.brand h1'),e=document.querySelector('.brand .eyebrow');
+  if(h)h.textContent=x.title;if(e)e.textContent=mode==='teacher'?x.teacher_subtitle:x.student_subtitle;document.title=mode==='teacher'?x.title+' 교사':x.title;return x}
+async function loadSite(client,mode){
+  paintSite(lsGet('gb-site',null),mode);
+  try{const r=await client.from('site_settings').select('title,student_subtitle,teacher_subtitle').eq('id',1).maybeSingle();
+    if(!r.error&&r.data){lsSet('gb-site',r.data);return paintSite(r.data,mode)}}catch(e){}
+  return paintSite(lsGet('gb-site',null),mode);
+}

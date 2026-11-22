@@ -110,6 +110,7 @@ async function submit(){
 }
 (async function boot(){
   T.draft=lsGet('gb-draft',{})||{};
+  loadSite(sb,'student');
   const tok=loadToken();
   if(tok){T.token=tok;try{await refreshHome()}catch(_){T.token=null}}
   render();
