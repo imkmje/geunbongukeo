@@ -30,7 +30,7 @@ const dxToday=()=>new Date().toISOString().slice(0,10);
 function csvTest(tid,c){
   const t=D().tests[tid];if(!t){toast('시험을 골라 주세요');return false}
   const studs=dxStudents(c||null).filter(s=>c||s.cls);// '모든 반' = 반에 속한 학생 전부
-  dxCsv(`근본국어_${t.title}_${c||'모든 반'}_성적_${dxToday()}`,testCsvRows(t,keyOf(tid),studs,dxSubs(tid)));return true;
+  dxCsv(`${/^근본국어/.test(t.title)?'':'근본국어_'}${t.title}_${c||'모든 반'}_성적_${dxToday()}`,testCsvRows(t,keyOf(tid),studs,dxSubs(tid)));return true;
 }
 function csvCum(c){dxCsv(`근본국어_${c}_누적 점수_${dxToday()}`,classCumRows(dxTests(),dxStudents(c),dxSubsAll()));return true}
 function csvClassAll(c){dxCsv(`근본국어_${c}_전체 답안 기록_${dxToday()}`,classAnswerRows(dxTests(),dxStudents(c),dxSubsAll()));return true}

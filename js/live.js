@@ -69,7 +69,7 @@ function viewProjector(t,key,R){
     return `<div class="pj-item"><div class="pj-no">${esc(x.no)}</div>
       <div class="pj-main"><div class="pj-rate ${tone(x.wrongRate)}"><span class="pj-pct">${rate(x.wrongRate)}</span><span class="pj-lbl">오답률</span></div>
         <div class="pj-bar"><i class="${tone(x.wrongRate)}" style="width:${x.wrongRate==null?0:Math.max(1,Math.round(x.wrongRate*100))}%"></i></div>
-        <div class="pj-top">${x.top?`가장 많이 고른 오답 <b>${CIR[x.top.opt]}</b> ${rate(x.top.share)}`:(x.n?'오답을 고른 학생 없음':'아직 답 없음')}${L.showKey&&x.ans?` <span class="pj-key">정답 ${CIR[+x.ans]}</span>`:''}</div></div>
+        <div class="pj-top">${x.top?`가장 많이 고른 오답 <b>${CIR[x.top.opt]}</b> ${rate(x.top.share)}`:(x.n?(x.wrong?`비운 학생 ${rate(x.blank)}`:'오답을 고른 학생 없음'):'아직 답 없음')}${L.showKey&&x.ans?` <span class="pj-key">정답 ${CIR[+x.ans]}</span>`:''}</div></div>
       <div class="pj-dist" aria-label="선지별 비율">${dist}</div></div>`;
   };
   return `<div class="proj" role="dialog" aria-modal="true" aria-label="해설 화면">
