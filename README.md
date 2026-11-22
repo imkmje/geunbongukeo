@@ -8,7 +8,8 @@
 
 ## 처음 설치
 1. Supabase 새 프로젝트를 만들고 SQL Editor에서 `supabase/schema.sql`을 실행한다(여러 번 실행해도 안전).
-   이미 쓰고 있는 프로젝트는 바뀐 점만 모은 `supabase/migrations/2026-11-ux-state.sql`만 실행해도 된다(여러 번 실행해도 안전).
+   이미 쓰고 있는 프로젝트는 바뀐 점만 모은 `supabase/migrations/2026-11-ux-state.sql`, `2026-11-login-dev.sql`, `2026-11-hash-privilege.sql`만 실행해도 된다(여러 번 실행해도 안전).
+   단 `2026-11-hash-privilege.sql`(그리고 그것이 들어 있는 최신 `schema.sql`)은 새 교사 화면을 GitHub Pages에 먼저 올린 뒤에 실행한다(예전 교사 화면은 학생 표를 통째로 읽다가 '권한 없음'이 난다).
 2. Authentication → Users에서 교사 계정을 만들고(Auto Confirm), SQL Editor에서 다음을 실행한다.
    `insert into public.teachers(user_id) select id from auth.users where email = '교사 이메일' on conflict do nothing;`
 3. Authentication 설정에서 새 가입(Allow new users to sign up)을 끈다.
@@ -19,7 +20,8 @@
 - 모든 표에 RLS가 켜져 있다. 공개 키만으로는 어떤 표도 읽거나 쓸 수 없다.
 - 교사는 `teachers` 표에 등록된 계정만 모든 표를 읽고 쓴다.
 - 학생은 표를 직접 만지지 못하고 `student_*` 함수만 쓴다. 결과 공개 뒤에는 점수와 문항별 맞음/틀림만 받고, 정답·해설·선지 비율·선생님 한마디는 자기 반에 '정답·해설 공개'를 한 시험만 받는다(서버에서 가림). 결과가 공개되면 처음 답안은 더 고칠 수 없다.
-- 학생 비밀번호는 bcrypt로 저장하며, 5번 틀리면 10분 잠긴다. 학번만 알면 다른 학생이 일부러 잠글 수 있으므로, 교사는 반 관리에서 잠긴 학생(잠금 해제 예정 시각이 보임)을 '잠금만 풀기'로 비밀번호를 그대로 둔 채 풀 수 있다. 잠금 방식을 바꾸고 싶으면 `supabase/migrations/optional-lockout-a-short.sql`(3분 고정) 또는 `optional-lockout-b-progressive.sql`(3분→10분→30분) 중 하나를 실행한다(파일 맨 위에 장단점). 처음(또는 교사가 초기화한 뒤) 비밀번호는 학번이고, 그 상태로 로그인하면 새 비밀번호(6자 이상, 학번과 다르게)를 정하기 전에는 시험 목록·제출·결과를 볼 수 없다.
+- 학생 비밀번호는 bcrypt로 저장하며, 5번 틀리면 10분 잠긴다. 학번만 알면 다른 학생이 일부러 잠글 수 있으므로, 교사는 반 관리에서 잠긴 학생(잠금 해제 예정 시각이 보임)을 '잠금만 풀기'로 비밀번호를 그대로 둔 채 풀 수 있다. 잠금 방식을 바꾸고 싶으면 `supabase/migrations/`의 선택안을 실행한다(파일 맨 위에 장단점·되돌리는 법): `optional-lockout-a-short.sql`(3분 고정), `optional-lockout-b-progressive.sql`(3분→10분→30분), `optional-lockout-c-delay.sql`(잠그지 않고 틀릴수록 최대 2초 기다림) 중 하나, 그리고 이것들과 함께 쓸 수 있는 `optional-lockout-d-device.sql`(학번이 잠겨도 전에 로그인했던 기기에서는 들어감). 처음(또는 교사가 초기화한 뒤) 비밀번호는 학번이고, 그 상태로 로그인하면 새 비밀번호(6자 이상, 학번과 다르게)를 정하기 전에는 시험 목록·제출·결과를 볼 수 없다.
+- 교사 로그인으로도 학생 비밀번호 해시(`students.code_hash`)는 읽을 수 없다(칸 권한). 교사 화면은 학생 표를 칸 이름을 적어서 읽는다(`select('*')` 안 됨).
 - 학번은 친구도 알 수 있으므로, 학생이 비밀번호를 바꾸기 전에 다른 학생이 먼저 들어갈 수 있다. 첫 로그인 즉시 바꾸게 하고, 이상하면 교사가 초기화한다(초기화하면 그 학생의 로그인도 모두 끊긴다).
 
 ## 운영

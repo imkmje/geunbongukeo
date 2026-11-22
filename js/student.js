@@ -131,10 +131,24 @@ function render(){
 }
 
 /* ---------- 동작 ---------- */
+/* 로그인 기기 번호(newDeviceId: js/student-logic.js). 서버 student_login_dev가 없으면(새 SQL을 실행하기 전) 예전 student_login으로. */
+const DEVICE_KEY='gb-device';
+function deviceId(){let d=lsGet(DEVICE_KEY,null);if(!deviceIdOk(d)){d=newDeviceId();lsSet(DEVICE_KEY,d)}return d}
+let loginOld=false;
+async function callLogin(sid,pw){
+  if(!loginOld){const r=await sb.rpc('student_login_dev',{p_sid:sid,p_password:pw,p_device:deviceId()});if(!rpcMissing(r.error))return r;loginOld=true}
+  return sb.rpc('student_login',{p_sid:sid,p_password:pw});
+}
+let loggingIn=false;
 document.addEventListener('submit',async e=>{
   if(e.target.id!=='stuLogin')return;e.preventDefault();
-  const msg=$('#lgMsg');msg.textContent='확인하는 중…';
-  const r=await sb.rpc('student_login',{p_sid:$('#lgSid').value.trim(),p_password:$('#lgCode').value.trim()});
+  if(loggingIn)return;// 한 번 누르면 답이 올 때까지(많이 몰리면 몇 초) 다시 보내지 않는다
+  const msg=$('#lgMsg');const btn=e.target.querySelector('button[type="submit"]');
+  loggingIn=true;msg.textContent='확인하는 중…';if(btn){btn.disabled=true;btn.textContent='확인하는 중…'}
+  let r;
+  try{r=await callLogin($('#lgSid').value.trim(),$('#lgCode').value.trim())}
+  catch(err){r={error:err}}
+  finally{loggingIn=false;if(btn){btn.disabled=false;btn.textContent='로그인'}}
   if(r.error){msg.textContent='서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요.';return}
   const d=r.data||{};
   if(!d.ok){msg.textContent=loginErrorMsg(d.error,d.until);return}

@@ -787,3 +787,35 @@ grant execute on function public.teacher_unlock_student(uuid) to authenticated;
 grant execute on function public.teacher_set_class_hidden(uuid, boolean) to authenticated;
 grant execute on function public.student_results(uuid, uuid) to anon, authenticated;
 -- _test_class_release_close, _class_stats_min_n은 아무에게도 주지 않는다(안에서만 쓰임).
+
+-- ═══ 2026-11 보안: 학생 로그인 기기 번호 받는 자리 · 교사 화면도 비밀번호 해시를 읽지 못하게 ═══
+-- 이 블록만 따로 실행하려면 supabase/migrations/2026-11-login-dev.sql, 2026-11-hash-privilege.sql을 쓴다(같은 내용).
+
+-- ───── 로그인 기기 번호 받는 자리(student_login_dev) ─────
+-- 학생 화면은 로그인할 때 이 함수를 먼저 부르고, 기기(브라우저)마다 만든 무작위 번호(p_device)를 함께 보낸다.
+-- 기본 규칙에서는 기기 번호를 쓰지도 저장하지도 않고 student_login(5번 틀리면 10분 잠금)을 그대로 부른다.
+-- 잠금 방식 선택안 D(supabase/migrations/optional-lockout-d-device.sql)를 실행하면 이 함수가 '로그인했던 기기 기억'으로 바뀌고,
+-- 이 파일을 다시 실행하면 아래 기본(그대로 넘기기)으로 돌아간다.
+-- (이 함수가 없는 서버에서는 학생 화면이 예전 student_login을 부른다.)
+create or replace function public.student_login_dev(p_sid text, p_password text, p_device text default null)
+returns json language sql volatile
+set search_path = public
+as $$ select public.student_login(p_sid, p_password) $$;
+revoke execute on function public.student_login_dev(text, text, text) from public, anon, authenticated;
+grant execute on function public.student_login_dev(text, text, text) to anon, authenticated;
+
+-- ───── 학생 표(students) 칸 권한: 비밀번호 해시(code_hash)는 교사 로그인으로도 읽을 수 없다 ─────
+-- RLS는 '어떤 줄'을 볼지 정할 뿐 '어떤 칸'은 막지 못한다. 그래서 교사 화면이 select('*')로 읽으면 학생 비밀번호 해시가
+-- 교사 브라우저까지 내려왔다(교사 계정이 털리면 해시를 가져가 비밀번호를 맞혀 볼 수 있음). 이제 칸마다 권한을 준다.
+--  * 읽기: id, sid, name, class_id, must_change_pw, fail_count, locked_until, created_at (code_hash는 빠짐)
+--  * 새로 넣기·고치기: sid, name, class_id만(명단 붙여넣기 upsert, 반 옮기기·빼기). 비밀번호·잠금은 함수(teacher_*)로만 바꾼다.
+--  * 지우기: 그대로 둔다(교사만, RLS).
+--  * anon(공개 키)은 어떤 칸도 못 읽고 못 쓴다(원래도 RLS로 막혀 있었다).
+-- 주의: 이 뒤로는 students를 select('*')로 읽으면 'permission denied for table students' 오류가 난다.
+--       교사 화면은 칸 이름을 적어서 읽어야 한다. 학생 함수(student_*)와 교사 함수(teacher_*)는 소유자 권한으로 돌아 영향이 없다.
+-- 표 전체 권한을 거두면 칸 권한도 함께 거둬지므로, 여러 번 실행해도 결과가 같다.
+revoke all on table public.students from anon, authenticated;
+grant select (id, sid, name, class_id, must_change_pw, fail_count, locked_until, created_at) on public.students to authenticated;
+grant insert (sid, name, class_id) on public.students to authenticated;
+grant update (sid, name, class_id) on public.students to authenticated;
+grant delete on public.students to authenticated;
