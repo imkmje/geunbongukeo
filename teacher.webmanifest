@@ -1,0 +1,14 @@
+{
+  "name": "근본국어 교사",
+  "short_name": "근본국어 교사",
+  "start_url": "./teacher.html",
+  "scope": "./teacher.html",
+  "display": "standalone",
+  "background_color": "#111114",
+  "theme_color": "#16161a",
+  "icons": [
+    { "src": "icons/teacher-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/teacher-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/teacher.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
